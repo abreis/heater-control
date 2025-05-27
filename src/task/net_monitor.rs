@@ -1,0 +1,46 @@
+use alloc::boxed::Box;
+use embassy_net as net;
+use embassy_sync::{
+    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
+    pubsub::{PubSubBehavior, PubSubChannel},
+    watch,
+};
+use embassy_time::{Duration, Timer};
+use esp_println::println;
+use esp_wifi::wifi;
+
+/// How often to check for changes in the network status.
+const NET_MONITOR_INTERVAL: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkStatus {
+    link_up: bool,
+    ip_config: Option<embassy_net::StaticConfigV4>,
+}
+
+pub type NetStatusWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, NetworkStatus, W>;
+pub type NetStatusDynSender = watch::DynSender<'static, NetworkStatus>;
+
+/// Takes a const that sets the maximum number of watchers.
+pub fn init<const WATCHERS: usize>() -> NetStatusWatch<WATCHERS> {
+    Box::leak(Box::new(watch::Watch::new()))
+}
+
+// Monitors the network interface and signals changes.
+#[embassy_executor::task]
+pub async fn net_monitor(stack: net::Stack<'static>, net_status_sender: NetStatusDynSender) {
+    loop {
+        Timer::after(NET_MONITOR_INTERVAL).await;
+
+        let new_status = NetworkStatus {
+            link_up: stack.is_link_up(),
+            ip_config: stack.config_v4(),
+        };
+
+        // Notify if changed.
+        net_status_sender.send_if_modified(|prev_status| match prev_status {
+            Some(status) => new_status.ne(status),
+            _ => true,
+        });
+    }
+}

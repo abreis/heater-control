@@ -1,0 +1,16 @@
+# Rust-specific
+Cargo.lock
+**/*.rs.bk
+/target
+# macOS-specific
+.DS_Store
+
+# Every directory except whitelist.
+/*/
+!/src/
+
+# Every markdown except whitelist.
+/*.md
+!/CHANGELOG.md
+!/DESIGN.md
+!/README.md
