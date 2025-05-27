@@ -29,6 +29,11 @@ pub fn init<const WATCHERS: usize>() -> NetStatusWatch<WATCHERS> {
 // Monitors the network interface and signals changes.
 #[embassy_executor::task]
 pub async fn net_monitor(stack: net::Stack<'static>, net_status_sender: NetStatusDynSender) {
+    let mut status = NetworkStatus {
+        link_up: false,
+        ip_config: None,
+    };
+
     loop {
         Timer::after(NET_MONITOR_INTERVAL).await;
 
@@ -38,9 +43,9 @@ pub async fn net_monitor(stack: net::Stack<'static>, net_status_sender: NetStatu
         };
 
         // Notify if changed.
-        net_status_sender.send_if_modified(|prev_status| match prev_status {
-            Some(status) => new_status.ne(status),
-            _ => true,
-        });
+        if status != new_status {
+            net_status_sender.send(new_status.clone());
+            status = new_status;
+        }
     }
 }
