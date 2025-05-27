@@ -4,6 +4,7 @@
 use embassy_executor::{SpawnError, Spawner};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 
@@ -31,7 +32,11 @@ async fn main(spawner: Spawner) {
     let _pin8_unused = peripherals.GPIO3;
     let _pin9_unused = peripherals.GPIO13;
     // G1 controls the solid state relay (SSR) through a MOSFET.
-    let _pin_control_ssr = peripherals.GPIO1;
+    let output_5ma = gpio::OutputConfig::default()
+        .with_drive_strength(gpio::DriveStrength::_5mA)
+        .with_drive_mode(gpio::DriveMode::PushPull)
+        .with_pull(gpio::Pull::None);
+    let pin_control_ssr = gpio::Output::new(peripherals.GPIO1, gpio::Level::Low, output_5ma);
     // G5 reads the case button, which pulls the line to GND when pressed.
     let _pin_button = peripherals.GPIO5;
     // G7 is the 1Wire bus commanding the DS18B20 temperature sensors, which are phantom-powered.
@@ -57,7 +62,10 @@ async fn main(spawner: Spawner) {
     let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
 
     // Get a watcher to monitor the network interface.
-    let net_status_watch = task::net_monitor::init::<1>();
+    let netstatus_watch = task::net_monitor::init::<1>();
+
+    // Get a watcher to notify the SSR controller of a new duty cycle.
+    let ssrcontrol_watch = task::ssr_control::init::<1>();
 
     //
     // Spawn tasks.
@@ -69,7 +77,13 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::net::stack_runner(net_runner))?;
 
         // Monitor the network stack for changes.
-        spawner.spawn(task::net_monitor(net_stack, net_status_watch.dyn_sender()))?;
+        spawner.spawn(task::net_monitor(net_stack, netstatus_watch.dyn_sender()))?;
+
+        // Control the SSR duty cycle.
+        spawner.spawn(task::ssr_control::ssr_control(
+            pin_control_ssr,
+            ssrcontrol_watch.dyn_receiver().unwrap(),
+        ))?;
 
         // Take a temperature measurement periodically.
         spawner.spawn(task::temp_sensor(

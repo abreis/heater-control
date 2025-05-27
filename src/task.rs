@@ -3,6 +3,7 @@
 // pub mod serial_console;
 pub mod net;
 pub mod net_monitor;
+pub mod ssr_control;
 pub mod temp_sensor;
 pub mod wifi;
 
