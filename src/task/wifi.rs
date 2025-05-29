@@ -1,9 +1,9 @@
-use alloc::boxed::Box;
+use crate::memlog::SharedLogger;
+use alloc::{boxed::Box, format};
 use embassy_executor::Spawner;
 use embassy_net as net;
 use embassy_time::{Duration, Timer};
 use esp_hal::{peripheral::Peripheral, peripherals, rng::Rng};
-use esp_println::{print, println};
 use esp_wifi::{
     EspWifiRngSource, EspWifiTimerSource,
     config::PowerSaveMode,
@@ -12,7 +12,7 @@ use esp_wifi::{
 
 const WIFI_SSID: &str = "definitely_not_a_honeypot";
 const WIFI_PASS: &str = "nice_try_but";
-//
+// How long to wait before attempting to reconnect to WiFi.
 const WIFI_RECONNECT_PAUSE: Duration = Duration::from_secs(5);
 
 /// Initializes the WiFi in client mode.
@@ -52,8 +52,14 @@ pub async fn init(
 }
 
 #[embassy_executor::task]
-pub async fn wifi_permanent_connection(mut controller: wifi::WifiController<'static>) {
-    println!("[wifi] capabilities: {:?}", controller.capabilities());
+pub async fn wifi_permanent_connection(
+    mut controller: wifi::WifiController<'static>,
+    memlog: SharedLogger,
+) {
+    memlog.debug(format!(
+        "wifi: capabilities: {:?}",
+        controller.capabilities()
+    ));
     loop {
         // If we're still connected, wait until we disconnect.
         if wifi::wifi_state() == WifiState::StaConnected {
@@ -68,14 +74,13 @@ pub async fn wifi_permanent_connection(mut controller: wifi::WifiController<'sta
         // Start the WiFi controller if necessary.
         if !matches!(controller.is_started(), Ok(true)) {
             // TODO: do we need to set_configuration and set_power_saving here in the loop?
-            println!("[wifi] starting controller");
+            memlog.debug("wifi: starting controller");
             controller.start_async().await.unwrap();
         }
 
-        print!("[wifi] connecting...");
         match controller.connect_async().await {
-            Ok(()) => println!(" connected"),
-            Err(error) => println!(" {error:?}"),
+            Ok(()) => memlog.debug("wifi: connected"),
+            Err(error) => memlog.debug(format!("wifi: connect error: {:?}", error)),
         }
     }
 }

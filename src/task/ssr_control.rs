@@ -8,10 +8,10 @@ pub type SsrControlDynSender = watch::DynSender<'static, u8>;
 pub type SsrControlDynReceiver = watch::DynReceiver<'static, u8>;
 
 // The duration of each duty step.
-// Smallest interval is one 60Hz mains power cycle (16.667ms).
+// Smallest interval is one 50Hz mains power cycle (20ms).
 // Note: SSR operate time is max. 1/2 cycle of voltage sine wave +1 ms.
-// 150ms: 100 steps over 15 seconds (900 cycles), 9 cycles per step.
-const PATTERN_STEP_DURATION: Duration = Duration::from_millis(150);
+// 200ms: 100 steps over 20 seconds (1000 cycles), 10 cycles per step.
+const PATTERN_STEP_DURATION: Duration = Duration::from_millis(200);
 
 /// Takes a const that sets the maximum number of watchers.
 pub fn init<const WATCHERS: usize>() -> SsrControlWatch<WATCHERS> {

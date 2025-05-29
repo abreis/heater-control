@@ -11,6 +11,7 @@ use esp_hal::timer::timg::TimerGroup;
 extern crate alloc;
 
 mod ds18b20;
+mod memlog;
 mod onewire;
 mod task;
 
@@ -46,8 +47,12 @@ async fn main(spawner: Spawner) {
     // G15 powers the case button LED.
     let _pin_button_led = peripherals.GPIO15;
     // UART pins.
-    let _pin_uart_tx = peripherals.GPIO43;
-    let _pin_uart_rx = peripherals.GPIO44;
+    let pin_uart_tx = peripherals.GPIO43;
+    let pin_uart_rx = peripherals.GPIO44;
+
+    // Initialize an in-memory logger with space for 480 characters.
+    let memlog = memlog::init(480);
+    memlog.info("heater control initialized");
 
     // Get a watcher to await changes in temperature sensor readings.
     let tempsensor_watch = task::temp_sensor::init();
@@ -62,16 +67,19 @@ async fn main(spawner: Spawner) {
     let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
 
     // Get a watcher to monitor the network interface.
-    let netstatus_watch = task::net_monitor::init::<1>();
+    let netstatus_watch = task::net_monitor::init::<2>();
 
     // Get a watcher to notify the SSR controller of a new duty cycle.
-    let ssrcontrol_watch = task::ssr_control::init::<1>();
+    let ssrcontrol_watch = task::ssr_control::init::<2>();
 
     //
     // Spawn tasks.
     || -> Result<(), SpawnError> {
         // Keep the wifi connected.
-        spawner.spawn(task::wifi::wifi_permanent_connection(wifi_controller))?;
+        spawner.spawn(task::wifi::wifi_permanent_connection(
+            wifi_controller,
+            memlog,
+        ))?;
 
         // Run the network stack.
         spawner.spawn(task::net::stack_runner(net_runner))?;
@@ -89,6 +97,18 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::temp_sensor(
             pin_sensor_temp.into(),
             tempsensor_watch.dyn_sender(),
+        ))?;
+
+        // Launch a control interface on UART0.
+        spawner.spawn(task::serial_console(
+            peripherals.UART0.into(),
+            pin_uart_rx.into(),
+            pin_uart_tx.into(),
+            ssrcontrol_watch.dyn_sender(),
+            ssrcontrol_watch.dyn_receiver().unwrap(),
+            netstatus_watch.dyn_receiver().unwrap(),
+            tempsensor_watch.dyn_receiver().unwrap(),
+            memlog,
         ))?;
 
         Ok(())

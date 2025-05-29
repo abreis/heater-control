@@ -20,6 +20,7 @@ pub struct NetworkStatus {
 
 pub type NetStatusWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, NetworkStatus, W>;
 pub type NetStatusDynSender = watch::DynSender<'static, NetworkStatus>;
+pub type NetStatusDynReceiver = watch::DynReceiver<'static, NetworkStatus>;
 
 /// Takes a const that sets the maximum number of watchers.
 pub fn init<const WATCHERS: usize>() -> NetStatusWatch<WATCHERS> {
