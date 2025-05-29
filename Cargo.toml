@@ -1,12 +1,12 @@
 [package]
 edition = "2024"
-name = "heater_control"
+name = "heater-control"
 version = "0.1.0"
 authors = ["Andre Braga Reis <andre@saltwing.com>"]
 publish = false
 
 [[bin]]
-name = "heater_control"
+name = "heater-control"
 path = "./src/main.rs"
 test = false
 bench = false

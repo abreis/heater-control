@@ -64,7 +64,7 @@ pub async fn serial_console(
         // Try block to catch UART errors.
         let catch = async || -> Result<(), uart::TxError> {
             // Write the MOTD out.
-            uart.write_async(MOTD.as_bytes()).await?;
+            uart.write_all_async(MOTD.as_bytes()).await?;
 
             let prompt = "> ";
             // Note: Ctrl-C and Ctrl-D break the readline while loop.
@@ -128,10 +128,8 @@ async fn cli_parser(
         // SSR control.
         (Some("ssr"), Some("pwm")) => match chunks.next() {
             Some("read") => {
-                let pwm_value = ssrcontrol_receiver.get().await;
-                let response_str = format!("{:?}\r\n", pwm_value);
-                uart.write_all_async(response_str.as_bytes()).await?;
-                ""
+                let pwm_value = ssrcontrol_receiver.try_get();
+                &format!("{:?}", pwm_value)
             }
             Some(duty_str) => match duty_str.parse::<u8>() {
                 Ok(duty_value) => {
@@ -152,7 +150,7 @@ async fn cli_parser(
         //
         // Temp sensor.
         (Some("temp"), Some("read")) => {
-            let sensor_result = tempsensor_receiver.get().await;
+            let sensor_result = tempsensor_receiver.try_get();
             &format!("{:?}", sensor_result)
         }
         (Some("temp"), Some("watch")) => {
@@ -184,10 +182,8 @@ async fn cli_parser(
         //
         // Network status.
         (Some("net"), Some("read")) => {
-            let net_status = netstatus_receiver.get().await;
-            let response_str = format!("Network status: {:?}\r\n", net_status);
-            uart.write_all_async(response_str.as_bytes()).await?;
-            ""
+            let net_status = netstatus_receiver.try_get();
+            &format!("{:?}", net_status)
         }
         (Some("net"), Some("watch")) => {
             let mut buf = [0u8; 1];

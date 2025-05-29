@@ -56,10 +56,8 @@ pub async fn wifi_permanent_connection(
     mut controller: wifi::WifiController<'static>,
     memlog: SharedLogger,
 ) {
-    memlog.debug(format!(
-        "wifi: capabilities: {:?}",
-        controller.capabilities()
-    ));
+    memlog.debug(format!("wifi: state: {:?}", wifi::wifi_state()));
+
     loop {
         // If we're still connected, wait until we disconnect.
         if wifi::wifi_state() == WifiState::StaConnected {
