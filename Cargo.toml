@@ -66,6 +66,7 @@ crc = "3.3.0"
 embassy-futures = "0.1.1"
 const_format = { version = "0.2.34", features = ["fmt", "rust_1_83"] }
 noline = { version = "0.5.1", features = ["alloc"] }
+picoserve = { version = "0.16.0", features = ["alloc", "embassy"] }
 
 [profile.dev]
 # Rust debug is too slow.

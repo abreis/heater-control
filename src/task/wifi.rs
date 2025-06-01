@@ -20,7 +20,6 @@ const WIFI_RECONNECT_PAUSE: Duration = Duration::from_secs(5);
 /// Returns a WiFi controller and WiFi interfaces.
 ///
 /// Sets a hardcoded SSID and passphrase, and disables power save for performance.
-#[must_use]
 pub async fn init(
     timer: impl Peripheral<P = impl EspWifiTimerSource> + 'static,
     radio_clocks: impl Peripheral<P = peripherals::RADIO_CLK> + 'static,

@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 
 use embassy_executor::{SpawnError, Spawner};
 use esp_backtrace as _;
@@ -17,7 +18,8 @@ mod task;
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_240MHz);
+    // let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_240MHz);
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
     let peripherals = esp_hal::init(config);
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
@@ -54,9 +56,6 @@ async fn main(spawner: Spawner) {
     let memlog = memlog::init(480);
     memlog.info("heater control initialized");
 
-    // Get a watcher to await changes in temperature sensor readings.
-    let tempsensor_watch = task::temp_sensor::init();
-
     // Set up the WiFi.
     let (wifi_controller, wifi_interfaces) =
         task::wifi::init(timer1.timer0, peripherals.RADIO_CLK, peripherals.WIFI, rng)
@@ -66,11 +65,17 @@ async fn main(spawner: Spawner) {
     // Set up the network stack.
     let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
 
+    //
+    // Watcher count: 1 for serial console, 2 for httpd workers
+
+    // Get a watcher to await changes in temperature sensor readings.
+    let tempsensor_watch = task::temp_sensor::init::<4>();
+
     // Get a watcher to monitor the network interface.
-    let netstatus_watch = task::net_monitor::init::<2>();
+    let netstatus_watch = task::net_monitor::init::<4>();
 
     // Get a watcher to notify the SSR controller of a new duty cycle.
-    let ssrcontrol_watch = task::ssr_control::init::<2>();
+    let ssrcontrol_watch = task::ssr_control::init::<4>();
 
     //
     // Spawn tasks.
@@ -110,6 +115,17 @@ async fn main(spawner: Spawner) {
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
         ))?;
+
+        // Launch httpd workers.
+        task::httpd::launch_workers(
+            spawner,
+            net_stack,
+            ssrcontrol_watch.dyn_sender(),
+            ssrcontrol_watch.dyn_receiver().unwrap(),
+            netstatus_watch.dyn_receiver().unwrap(),
+            tempsensor_watch.dyn_receiver().unwrap(),
+            memlog,
+        )?;
 
         Ok(())
     }()

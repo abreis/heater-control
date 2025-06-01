@@ -286,8 +286,8 @@ impl OneWireBus {
 
     #[inline]
     pub fn read_bytes<const N: usize>(&mut self, buffer: &mut [u8; N]) {
-        for i in 0..N {
-            buffer[i] = self.read_byte();
+        for entry in buffer.iter_mut() {
+            *entry = self.read_byte();
         }
     }
 }

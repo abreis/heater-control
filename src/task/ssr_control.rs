@@ -85,13 +85,13 @@ fn generate_evenly_distributed_steps(duty_percent: u8) -> [bool; 100] {
     let mut accumulator: i32 = TOTAL_STEPS_I32 / 2;
 
     // Loop through each of the 100 steps to decide if it's ON or OFF.
-    for i in 0..TOTAL_STEPS {
+    for step in steps_array.iter_mut() {
         // Add the "target density" of ON states to the accumulator.
         accumulator += num_on_steps_target;
 
         // Check if the accumulator has reached the threshold.
         if accumulator >= TOTAL_STEPS_I32 {
-            steps_array[i] = true; // This step is ON.
+            *step = true; // This step is ON.
             // "Spend" the credit for one ON pulse by subtracting TOTAL_STEPS
             // from the accumulator.
             accumulator -= TOTAL_STEPS_I32;

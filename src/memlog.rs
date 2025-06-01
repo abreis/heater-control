@@ -1,7 +1,7 @@
 //! An in-memory log storage, with a fixed size for records.
 #![allow(dead_code)]
 
-use alloc::{boxed::Box, collections::vec_deque::VecDeque, string::String};
+use alloc::{boxed::Box, collections::vec_deque::VecDeque, format, string::String};
 use core::{cell::RefCell, fmt::Display};
 use embassy_time::Instant;
 
@@ -50,11 +50,11 @@ pub enum Level {
 impl Display for Level {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Level::Trace => write!(f, "{}", "TRCE"),
-            Level::Debug => write!(f, "{}", "DEBG"),
-            Level::Info => write!(f, "{}", "INFO"),
-            Level::Warn => write!(f, "{}", "WARN"),
-            Level::Error => write!(f, "{}", "ERRO"),
+            Level::Trace => write!(f, "TRCE"),
+            Level::Debug => write!(f, "DEBG"),
+            Level::Info => write!(f, "INFO"),
+            Level::Warn => write!(f, "WARN"),
+            Level::Error => write!(f, "ERRO"),
         }
     }
 }
@@ -123,4 +123,22 @@ impl SharedLogger {
     pub fn records(&self) -> core::cell::Ref<'_, VecDeque<Record>> {
         core::cell::Ref::map(self.inner.borrow(), |storage| &storage.records)
     }
+}
+
+/// Formats a u64 millisecond value into "HHHHH:MM:SS.xxx" string.
+#[inline]
+pub fn format_milliseconds_to_hms(total_ms: u64) -> String {
+    let millis_part = total_ms % 1000;
+    let total_seconds = total_ms / 1000;
+
+    let seconds_part = total_seconds % 60;
+    let total_minutes = total_seconds / 60;
+
+    let minutes_part = total_minutes % 60;
+    let hours_part = total_minutes / 60;
+
+    format!(
+        "{:05}:{:02}:{:02}.{:03}",
+        hours_part, minutes_part, seconds_part, millis_part
+    )
 }

@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 use super::{
     net_monitor::NetStatusDynReceiver,
     ssr_control::{SsrControlDynReceiver, SsrControlDynSender},
@@ -11,7 +12,7 @@ use esp_hal::{Async, gpio, uart};
 
 // Number of bytes to allocate to keep a history of commands.
 const COMMAND_HISTORY_BUFFER_SIZE: usize = 1000; // in bytes
-const MOTD: &'static str = const_format::formatcp!(
+const SERIAL_MOTD: &str = const_format::formatcp!(
     "\r\n{} {}\r\n",
     env!("CARGO_PKG_NAME"),
     env!("CARGO_PKG_VERSION")
@@ -62,9 +63,9 @@ pub async fn serial_console(
 
     loop {
         // Try block to catch UART errors.
-        let catch = async || -> Result<(), uart::TxError> {
+        let catch: Result<(), uart::TxError> = async {
             // Write the MOTD out.
-            uart.write_all_async(MOTD.as_bytes()).await?;
+            uart.write_all_async(SERIAL_MOTD.as_bytes()).await?;
 
             let prompt = "> ";
             // Note: Ctrl-C and Ctrl-D break the readline while loop.
@@ -82,7 +83,7 @@ pub async fn serial_console(
             }
 
             Ok(())
-        }()
+        }
         .await;
 
         if let Err(tx_error) = catch {
@@ -121,7 +122,8 @@ async fn cli_parser(
              · watch\r\n\
              log\r\n\
              · read\r\n\
-             · clear"
+             · clear\r\n\
+             help"
         }
 
         //
@@ -213,13 +215,16 @@ async fn cli_parser(
         //
         // Log control.
         (Some("log"), Some("read")) => {
-            // Note: this locks the entire memlog while it is being printed.
-            for record in memlog.records().iter().rev() {
-                let timestamp = format_milliseconds_to_hms(record.instant.as_millis());
-                let formatted = format!("[{}] {}: {}\r\n", timestamp, record.level, record.text);
-                uart.write_all_async(formatted.as_bytes()).await?;
-            }
-            ""
+            //
+            &memlog
+                .records()
+                .iter()
+                .rev()
+                .map(|record| {
+                    let timestamp = memlog::format_milliseconds_to_hms(record.instant.as_millis());
+                    format!("[{}] {}: {}\r\n", timestamp, record.level, record.text)
+                })
+                .collect::<String>()
         }
         (Some("log"), Some("clear")) => {
             memlog.clear();
@@ -240,22 +245,4 @@ async fn cli_parser(
     }
 
     Ok(())
-}
-
-/// Formats a u64 millisecond value into "HHHHH:MM:SS.xxx" string.
-#[inline]
-fn format_milliseconds_to_hms(total_ms: u64) -> String {
-    let millis_part = total_ms % 1000;
-    let total_seconds = total_ms / 1000;
-
-    let seconds_part = total_seconds % 60;
-    let total_minutes = total_seconds / 60;
-
-    let minutes_part = total_minutes % 60;
-    let hours_part = total_minutes / 60;
-
-    format!(
-        "{:05}:{:02}:{:02}.{:03}",
-        hours_part, minutes_part, seconds_part, millis_part
-    )
 }
