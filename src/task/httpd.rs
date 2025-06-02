@@ -1,24 +1,20 @@
-use core::cell::RefCell;
-
+use super::{net_monitor::NetStatusDynReceiver, temp_sensor::TempSensorDynReceiver};
+use crate::{
+    memlog::{self, SharedLogger},
+    task::ssr_control::{SsrCommand, SsrCommandChannelSender, SsrDutySignal},
+};
 use alloc::{
     boxed::Box,
     format,
     rc::Rc,
     string::{String, ToString},
 };
+use core::cell::RefCell;
 use embassy_executor::{SpawnError, Spawner};
 use embassy_time::Duration;
 use picoserve::{
     AppBuilder, AppRouter, Config, Router, Timeouts,
     routing::{PathRouter, get, parse_path_segment, post},
-};
-
-use crate::memlog::{self, SharedLogger};
-
-use super::{
-    net_monitor::NetStatusDynReceiver,
-    ssr_control::{SsrControlDynReceiver, SsrControlDynSender},
-    temp_sensor::TempSensorDynReceiver,
 };
 
 const HTTPD_MOTD: &str =
@@ -48,15 +44,15 @@ pub const HTTPD_CONFIG: Config<Duration> =
 pub fn launch_workers(
     spawner: Spawner,
     stack: embassy_net::Stack<'static>,
-    ssrcontrol_sender: SsrControlDynSender,
-    ssrcontrol_receiver: SsrControlDynReceiver,
+    ssrcontrol_duty_signal: SsrDutySignal,
+    ssrcontrol_command_sender: SsrCommandChannelSender,
     netstatus_receiver: NetStatusDynReceiver,
     tempsensor_receiver: TempSensorDynReceiver,
     memlog: SharedLogger,
 ) -> Result<(), SpawnError> {
     let app = AppProps {
-        ssrcontrol_sender,
-        ssrcontrol_receiver,
+        ssrcontrol_duty_signal,
+        ssrcontrol_command_sender,
         netstatus_receiver,
         tempsensor_receiver,
         memlog,
@@ -98,8 +94,8 @@ pub async fn worker(
 // HTTP routing.
 
 struct AppProps {
-    ssrcontrol_sender: SsrControlDynSender,
-    ssrcontrol_receiver: SsrControlDynReceiver,
+    ssrcontrol_duty_signal: SsrDutySignal,
+    ssrcontrol_command_sender: SsrCommandChannelSender,
     netstatus_receiver: NetStatusDynReceiver,
     tempsensor_receiver: TempSensorDynReceiver,
     memlog: SharedLogger,
@@ -115,8 +111,8 @@ impl AppBuilder for AppProps {
             .route(
                 "/help",
                 get(|| async {
-                    "GET /ssr/pwm\n\
-                     GET /ssr/pwm/<duty>\n\
+                    "GET /ssr/pwm/<duty>\n\
+                     GET /ssr/command/{lock,unlock}\n\
                      GET /temp\n\
                      GET /net\n\
                      GET /log\n\
@@ -139,20 +135,35 @@ impl AppBuilder for AppProps {
                 }),
             )
             .route(
-                "/ssr/pwm",
-                get(|| async {
-                    let value = app.borrow_mut().ssrcontrol_receiver.try_get();
-                    format!("{:#?}\n", value)
-                }),
-            )
-            .route(
-                ("/ssr/pwm", parse_path_segment::<u8>()),
-                get(move |duty| async move {
+                ("/ssr/pwm", parse_path_segment()),
+                get(move |duty: u8| async move {
                     if (0u8..=100).contains(&duty) {
-                        app.borrow_mut().ssrcontrol_sender.send(duty);
+                        app.borrow_mut().ssrcontrol_duty_signal.signal(duty);
                         format!("SSR duty set to {duty}\n")
                     } else {
                         "SSR duty must be in the [0,100] range\n".to_string()
+                    }
+                }),
+            )
+            .route(
+                ("/ssr/command", parse_path_segment()),
+                get(move |command: String| async move {
+                    match command.as_str() {
+                        "lock" => {
+                            app.borrow()
+                                .ssrcontrol_command_sender
+                                .send(SsrCommand::Lock)
+                                .await;
+                            "SSR lock command sent\n"
+                        }
+                        "unlock" => {
+                            app.borrow()
+                                .ssrcontrol_command_sender
+                                .send(SsrCommand::Unlock)
+                                .await;
+                            "SSR unlock command sent\n"
+                        }
+                        _ => "Invalid relay command\n",
                     }
                 }),
             )

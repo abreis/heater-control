@@ -1,10 +1,9 @@
 #![allow(clippy::too_many_arguments)]
-use super::{
-    net_monitor::NetStatusDynReceiver,
-    ssr_control::{SsrControlDynReceiver, SsrControlDynSender},
-    temp_sensor::TempSensorDynReceiver,
+use super::{net_monitor::NetStatusDynReceiver, temp_sensor::TempSensorDynReceiver};
+use crate::{
+    memlog::{self, SharedLogger},
+    task::ssr_control::{SsrCommand, SsrCommandChannelSender, SsrDutySignal},
 };
-use crate::memlog::{self, SharedLogger};
 use alloc::{format, string::String};
 use embassy_futures::select;
 use embassy_time::{Duration, Timer};
@@ -38,8 +37,8 @@ pub async fn serial_console(
     peripheral_uart: uart::AnyUart,
     pin_uart_rx: gpio::AnyPin,
     pin_uart_tx: gpio::AnyPin,
-    mut ssrcontrol_sender: SsrControlDynSender,
-    mut ssrcontrol_receiver: SsrControlDynReceiver,
+    ssrcontrol_duty_signal: SsrDutySignal,
+    ssrcontrol_command_sender: SsrCommandChannelSender,
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
     memlog: SharedLogger,
@@ -73,8 +72,8 @@ pub async fn serial_console(
                 cli_parser(
                     line,
                     &mut uart,
-                    &mut ssrcontrol_sender,
-                    &mut ssrcontrol_receiver,
+                    ssrcontrol_duty_signal,
+                    ssrcontrol_command_sender,
                     &mut netstatus_receiver,
                     &mut tempsensor_receiver,
                     memlog,
@@ -99,8 +98,8 @@ pub async fn serial_console(
 async fn cli_parser(
     line: &str,
     uart: &mut uart::Uart<'static, Async>,
-    ssrcontrol_sender: &mut SsrControlDynSender,
-    ssrcontrol_receiver: &mut SsrControlDynReceiver,
+    ssrcontrol_duty_signal: SsrDutySignal,
+    ssrcontrol_command_sender: SsrCommandChannelSender,
     netstatus_receiver: &mut NetStatusDynReceiver,
     tempsensor_receiver: &mut TempSensorDynReceiver,
     memlog: SharedLogger,
@@ -113,7 +112,7 @@ async fn cli_parser(
         (Some("help"), None) => {
             "ssr\r\n\
              · pwm <duty>\r\n\
-             · pwm read\r\n\
+             · command/{lock,unlock}\r\n\
              temp\r\n\
              · read\r\n\
              · watch\r\n\
@@ -129,14 +128,10 @@ async fn cli_parser(
         //
         // SSR control.
         (Some("ssr"), Some("pwm")) => match chunks.next() {
-            Some("read") => {
-                let pwm_value = ssrcontrol_receiver.try_get();
-                &format!("{:?}", pwm_value)
-            }
             Some(duty_str) => match duty_str.parse::<u8>() {
                 Ok(duty_value) => {
                     if (0..=100).contains(&duty_value) {
-                        ssrcontrol_sender.send(duty_value);
+                        ssrcontrol_duty_signal.signal(duty_value);
                         "Relay duty set"
                     } else {
                         "Relay duty value must be between 0 and 100"
@@ -145,6 +140,17 @@ async fn cli_parser(
                 Err(_parse_error) => "Failed to parse relay duty value.",
             },
             None => "Relay duty value required for 'ssr pwm'",
+        },
+        (Some("ssr"), Some("command")) => match chunks.next() {
+            Some("lock") => {
+                ssrcontrol_command_sender.send(SsrCommand::Lock).await;
+                "SSR lock command sent"
+            }
+            Some("unlock") => {
+                ssrcontrol_command_sender.send(SsrCommand::Unlock).await;
+                "SSR unlock command sent"
+            }
+            _ => "Relay command required",
         },
         (Some("ssr"), Some(_)) => "Invalid subcommand for 'ssr'",
         (Some("ssr"), None) => "Subcommand required for 'ssr'",

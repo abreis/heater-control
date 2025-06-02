@@ -1,11 +1,21 @@
 use alloc::boxed::Box;
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel, signal, watch};
 use embassy_time::{Duration, Timer};
 use esp_hal::gpio;
 
-pub type SsrControlWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u8, W>;
-pub type SsrControlDynSender = watch::DynSender<'static, u8>;
-pub type SsrControlDynReceiver = watch::DynReceiver<'static, u8>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SsrCommand {
+    /// Sets the SSR duty to zero and locks it from being updated.
+    Lock,
+    /// Unlocks the SSR duty, allowing it to be updated.
+    /// Remains set to zero until an update.
+    Unlock,
+}
+
+pub type SsrDutySignal = &'static signal::Signal<NoopRawMutex, u8>;
+pub type SsrCommandChannel = &'static channel::Channel<NoopRawMutex, SsrCommand, 1>;
+pub type SsrCommandChannelSender = channel::DynamicSender<'static, SsrCommand>;
+pub type SsrCommandChannelReceiver = channel::DynamicReceiver<'static, SsrCommand>;
 
 // The duration of each duty step.
 // Smallest interval is one 50Hz mains power cycle (20ms).
@@ -14,17 +24,24 @@ pub type SsrControlDynReceiver = watch::DynReceiver<'static, u8>;
 const PATTERN_STEP_DURATION: Duration = Duration::from_millis(200);
 
 /// Takes a const that sets the maximum number of watchers.
-pub fn init<const WATCHERS: usize>() -> SsrControlWatch<WATCHERS> {
-    Box::leak(Box::new(watch::Watch::new()))
+pub fn init<const WATCHERS: usize>() -> (SsrDutySignal, SsrCommandChannel) {
+    (
+        Box::leak(Box::new(signal::Signal::new())),
+        Box::leak(Box::new(channel::Channel::new())),
+    )
 }
 
 #[embassy_executor::task]
 pub async fn ssr_control(
     mut ssrcontrol_pin: gpio::Output<'static>,
-    mut ssrcontrol_receiver: SsrControlDynReceiver,
+    ssrcontrol_duty_signal: SsrDutySignal,
+    ssrcontrol_command_receiver: SsrCommandChannelReceiver,
 ) {
     // Generate an initial pattern for 0% duty cycle.
     let mut pattern = generate_evenly_distributed_steps(0);
+
+    // Locking the SSR sets its duty to zero and ignores any commands until an unlock.
+    let mut is_locked = false;
 
     loop {
         for step in 0..100 {
@@ -36,12 +53,25 @@ pub async fn ssr_control(
                 ssrcontrol_pin.set_low();
             }
 
+            // See if we have a lock/unlock message.
+            if let Ok(command) = ssrcontrol_command_receiver.try_receive() {
+                match command {
+                    SsrCommand::Lock => {
+                        pattern = [false; 100];
+                        is_locked = true;
+                    }
+                    SsrCommand::Unlock => is_locked = false,
+                }
+            }
+
             // See if we have a new duty cycle.
             // We simply replace the pattern and continue from the same step position.
             // Since the pattern is evenly distributed, this puts us right into the
             // new duty cycle.
-            if let Some(new_duty_cycle) = ssrcontrol_receiver.try_changed() {
-                pattern = generate_evenly_distributed_steps(new_duty_cycle);
+            if !is_locked {
+                if let Some(new_duty_cycle) = ssrcontrol_duty_signal.try_take() {
+                    pattern = generate_evenly_distributed_steps(new_duty_cycle);
+                }
             }
         }
     }

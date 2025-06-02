@@ -2,14 +2,14 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
+extern crate alloc;
+
 use embassy_executor::{SpawnError, Spawner};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
-
-extern crate alloc;
 
 mod ds18b20;
 mod memlog;
@@ -19,8 +19,8 @@ mod task;
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     // let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_240MHz);
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
-    let peripherals = esp_hal::init(config);
+    let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
+    let peripherals = esp_hal::init(esp_config);
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
     esp_hal_embassy::init(timer0.alarm0);
@@ -75,7 +75,7 @@ async fn main(spawner: Spawner) {
     let netstatus_watch = task::net_monitor::init::<4>();
 
     // Get a watcher to notify the SSR controller of a new duty cycle.
-    let ssrcontrol_watch = task::ssr_control::init::<4>();
+    let (ssrcontrol_duty_signal, ssrcontrol_command_channel) = task::ssr_control::init::<4>();
 
     //
     // Spawn tasks.
@@ -95,7 +95,8 @@ async fn main(spawner: Spawner) {
         // Control the SSR duty cycle.
         spawner.spawn(task::ssr_control::ssr_control(
             pin_control_ssr,
-            ssrcontrol_watch.dyn_receiver().unwrap(),
+            ssrcontrol_duty_signal,
+            ssrcontrol_command_channel.dyn_receiver(),
         ))?;
 
         // Take a temperature measurement periodically.
@@ -109,8 +110,8 @@ async fn main(spawner: Spawner) {
             peripherals.UART0.into(),
             pin_uart_rx.into(),
             pin_uart_tx.into(),
-            ssrcontrol_watch.dyn_sender(),
-            ssrcontrol_watch.dyn_receiver().unwrap(),
+            ssrcontrol_duty_signal,
+            ssrcontrol_command_channel.dyn_sender(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
@@ -120,8 +121,8 @@ async fn main(spawner: Spawner) {
         task::httpd::launch_workers(
             spawner,
             net_stack,
-            ssrcontrol_watch.dyn_sender(),
-            ssrcontrol_watch.dyn_receiver().unwrap(),
+            ssrcontrol_duty_signal,
+            ssrcontrol_command_channel.dyn_sender(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
