@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
+use core::net::Ipv4Addr;
 use embassy_executor::Spawner;
-use embassy_net as net;
+use embassy_net::{self as net, Ipv4Cidr};
 use esp_hal::rng::Rng;
 use esp_wifi::wifi;
 
@@ -14,8 +15,14 @@ pub async fn init(
     net::Stack<'static>,
     net::Runner<'static, wifi::WifiDevice<'static>>,
 ) {
-    // IPv4 + DHCP
-    let net_config = net::Config::dhcpv4(net::DhcpConfig::default());
+    // IPv4 + static IP
+    let net_config = net::Config::ipv4_static(net::StaticConfigV4 {
+        address: Ipv4Cidr::new(Ipv4Addr::new(10, 0, 1, 35), 26), // "10.0.1.35/26"
+        gateway: Default::default(),
+        dns_servers: Default::default(),
+    });
+    // DHCPv4
+    // let net_config = net::Config::dhcpv4(net::DhcpConfig::default());
 
     // Memory resources for the network stack.
     let net_resources = Box::leak::<'static>(Box::new(net::StackResources::<NET_SOCKETS>::new()));

@@ -103,6 +103,7 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::temp_sensor(
             pin_sensor_temp.into(),
             tempsensor_watch.dyn_sender(),
+            ssrcontrol_command_channel.dyn_sender(),
         ))?;
 
         // Launch a control interface on UART0.
