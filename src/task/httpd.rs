@@ -8,8 +8,8 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-use core::cell::RefCell;
 use embassy_executor::{SpawnError, Spawner};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::Duration;
 use picoserve::{
     AppBuilder, AppRouter, Config, Timeouts,
@@ -103,7 +103,7 @@ impl AppBuilder for AppProps {
     type PathRouter = impl picoserve::routing::PathRouter;
 
     fn build_app(self) -> picoserve::Router<Self::PathRouter> {
-        let app: &'static RefCell<AppProps> = Box::leak(Box::new(RefCell::new(self)));
+        let app: &'static Mutex<NoopRawMutex, AppProps> = Box::leak(Box::new(Mutex::new(self)));
 
         picoserve::Router::new()
             .route("/", get(|| async { HTTPD_MOTD }))
@@ -122,14 +122,14 @@ impl AppBuilder for AppProps {
             .route(
                 "/temp",
                 get(|| async {
-                    let value = app.borrow_mut().tempsensor_receiver.try_get();
+                    let value = app.lock().await.tempsensor_receiver.try_get();
                     format!("{:#?}\n", value)
                 }),
             )
             .route(
                 "/net",
                 get(|| async {
-                    let value = app.borrow_mut().netstatus_receiver.try_get();
+                    let value = app.lock().await.netstatus_receiver.try_get();
                     format!("{:#?}\n", value)
                 }),
             )
@@ -137,7 +137,7 @@ impl AppBuilder for AppProps {
                 ("/ssr/pwm", parse_path_segment()),
                 get(move |duty: u8| async move {
                     if (0u8..=100).contains(&duty) {
-                        app.borrow_mut().ssrcontrol_duty_signal.signal(duty);
+                        app.lock().await.ssrcontrol_duty_signal.signal(duty);
                         format!("SSR duty set to {duty}\n")
                     } else {
                         "SSR duty must be in the [0,100] range\n".to_string()
@@ -149,14 +149,16 @@ impl AppBuilder for AppProps {
                 get(move |command: String| async move {
                     match command.as_str() {
                         "lock" => {
-                            app.borrow()
+                            app.lock()
+                                .await
                                 .ssrcontrol_command_sender
                                 .send(SsrCommand::Lock)
                                 .await;
                             "SSR lock command sent\n"
                         }
                         "unlock" => {
-                            app.borrow()
+                            app.lock()
+                                .await
                                 .ssrcontrol_command_sender
                                 .send(SsrCommand::Unlock)
                                 .await;
@@ -169,7 +171,9 @@ impl AppBuilder for AppProps {
             .route(
                 "/log",
                 get(|| async {
-                    app.borrow()
+                    let result = app
+                        .lock()
+                        .await
                         .memlog
                         .records()
                         .iter()
@@ -179,13 +183,14 @@ impl AppBuilder for AppProps {
                                 memlog::format_milliseconds_to_hms(record.instant.as_millis());
                             format!("[{}] {}: {}\n", timestamp, record.level, record.text)
                         })
-                        .collect::<String>()
+                        .collect::<String>();
+                    result
                 }),
             )
             .route(
                 "/log/clear",
                 get(|| async {
-                    app.borrow().memlog.clear();
+                    app.lock().await.memlog.clear();
                     "Logs cleared\n"
                 }),
             )
