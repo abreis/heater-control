@@ -1,11 +1,9 @@
 use crate::memlog::SharedLogger;
 use alloc::{boxed::Box, format};
-use embassy_executor::Spawner;
-use embassy_net as net;
 use embassy_time::{Duration, Timer};
-use esp_hal::{peripheral::Peripheral, peripherals, rng::Rng};
+use esp_hal::{peripherals, rng::Rng};
 use esp_wifi::{
-    EspWifiRngSource, EspWifiTimerSource,
+    EspWifiTimerSource,
     config::PowerSaveMode,
     wifi::{self, WifiState},
 };
@@ -21,9 +19,9 @@ const WIFI_RECONNECT_PAUSE: Duration = Duration::from_secs(5);
 ///
 /// Sets a hardcoded SSID and passphrase, and disables power save for performance.
 pub async fn init(
-    timer: impl Peripheral<P = impl EspWifiTimerSource> + 'static,
-    radio_clocks: impl Peripheral<P = peripherals::RADIO_CLK> + 'static,
-    wifi: impl Peripheral<P = peripherals::WIFI> + 'static,
+    timer: impl EspWifiTimerSource + 'static,
+    radio_clocks: peripherals::RADIO_CLK<'static>,
+    wifi: peripherals::WIFI<'static>,
     rng: Rng,
 ) -> Result<(wifi::WifiController<'static>, wifi::Interfaces<'static>), wifi::WifiError> {
     // Allow some time before initializing the (power-hungry) WiFi.
@@ -35,11 +33,8 @@ pub async fn init(
 
     // Set the wifi client configuration.
     let wifi_client_config = wifi::ClientConfiguration {
-        ssid: WIFI_SSID.try_into().unwrap(),
-        password: WIFI_PASS.try_into().unwrap(),
-        // TODO: esp_wifi v0.14
-        // ssid: WIFI_SSID.into(),
-        // password: WIFI_PASS.into(),
+        ssid: WIFI_SSID.into(),
+        password: WIFI_PASS.into(),
         ..Default::default()
     };
     wifi_controller.set_configuration(&wifi::Configuration::Client(wifi_client_config))?;

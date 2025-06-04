@@ -1,6 +1,5 @@
 use alloc::boxed::Box;
 use core::net::Ipv4Addr;
-use embassy_executor::Spawner;
 use embassy_net::{self as net, Ipv4Cidr};
 use esp_hal::rng::Rng;
 use esp_wifi::wifi;

@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel, signal, watch};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel, signal};
 use embassy_time::{Duration, Timer};
 use esp_hal::gpio;
 

@@ -34,9 +34,9 @@ impl UartWriteAllAsync for uart::Uart<'_, Async> {
 /// Triggers actions controlled by output pins.
 #[embassy_executor::task]
 pub async fn serial_console(
-    peripheral_uart: uart::AnyUart,
-    pin_uart_rx: gpio::AnyPin,
-    pin_uart_tx: gpio::AnyPin,
+    peripheral_uart: uart::AnyUart<'static>,
+    pin_uart_rx: gpio::AnyPin<'static>,
+    pin_uart_tx: gpio::AnyPin<'static>,
     ssrcontrol_duty_signal: SsrDutySignal,
     ssrcontrol_command_sender: SsrCommandChannelSender,
     mut netstatus_receiver: NetStatusDynReceiver,

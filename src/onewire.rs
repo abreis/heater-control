@@ -50,17 +50,16 @@ mod timing {
 }
 
 impl OneWireBus {
-    pub fn new(onewire_pin: gpio::AnyPin) -> Self {
-        let mut pin = gpio::Output::new(
-            onewire_pin,
-            gpio::Level::High,
-            gpio::OutputConfig::default()
+    pub fn new(onewire_pin: gpio::AnyPin<'static>) -> Self {
+        let mut pin = gpio::Flex::new(onewire_pin);
+        pin.apply_output_config(
+            &gpio::OutputConfig::default()
                 .with_drive_mode(gpio::DriveMode::OpenDrain)
                 .with_pull(gpio::Pull::None)
                 .with_drive_strength(gpio::DriveStrength::_40mA),
-        )
-        .into_flex();
-        pin.enable_input(true);
+        );
+        pin.set_output_enable(true);
+        pin.set_input_enable(true);
 
         Self {
             pin,

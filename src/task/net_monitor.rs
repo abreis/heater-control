@@ -1,13 +1,7 @@
 use alloc::boxed::Box;
 use embassy_net as net;
-use embassy_sync::{
-    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
-    pubsub::{PubSubBehavior, PubSubChannel},
-    watch,
-};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use embassy_time::{Duration, Timer};
-use esp_println::println;
-use esp_wifi::wifi;
 
 /// How often to check for changes in the network status.
 const NET_MONITOR_INTERVAL: Duration = Duration::from_secs(5);

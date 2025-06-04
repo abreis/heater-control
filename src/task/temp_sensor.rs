@@ -3,10 +3,9 @@ use crate::{
     onewire::OneWireBus,
     task::ssr_control::{SsrCommand, SsrCommandChannelSender},
 };
-use alloc::{boxed::Box, format, string::String};
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, pubsub, signal, watch};
+use alloc::boxed::Box;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use embassy_time::{Duration, Timer};
-use embedded_hal::digital::{InputPin, OutputPin};
 use esp_hal::gpio;
 
 pub type TempSensorWatch<const W: usize> =
@@ -29,7 +28,7 @@ const TEMP_LIMIT_LOW: f32 = 30.0;
 
 #[embassy_executor::task]
 pub async fn temp_sensor(
-    onewire_pin: gpio::AnyPin,
+    onewire_pin: gpio::AnyPin<'static>,
     tempsensor_sender: TempSensorDynSender,
     ssrcontrol_command_sender: SsrCommandChannelSender,
 ) {

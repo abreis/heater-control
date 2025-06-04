@@ -6,15 +6,14 @@ use crate::{
 use alloc::{
     boxed::Box,
     format,
-    rc::Rc,
     string::{String, ToString},
 };
 use core::cell::RefCell;
 use embassy_executor::{SpawnError, Spawner};
 use embassy_time::Duration;
 use picoserve::{
-    AppBuilder, AppRouter, Config, Router, Timeouts,
-    routing::{PathRouter, get, parse_path_segment, post},
+    AppBuilder, AppRouter, Config, Timeouts,
+    routing::{get, parse_path_segment},
 };
 
 const HTTPD_MOTD: &str =

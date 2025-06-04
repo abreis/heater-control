@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-
 pub mod httpd;
 pub mod net;
 pub mod net_monitor;
