@@ -1,19 +1,17 @@
-use crate::{
-    ds18b20::{DS18B20Error, Ds18b20, Resolution, SensorData},
-    onewire::OneWireBus,
-    task::ssr_control::{SsrCommand, SsrCommandChannelSender},
-};
+use crate::task::ssr_control::{SsrCommand, SsrCommandChannelSender};
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use embassy_time::{Duration, Timer};
+use esp_ds18b20::{Ds18b20, Ds18b20Error, Resolution, SensorData};
 use esp_hal::gpio;
+use esp_onewire::OneWireBus;
 
 pub type TempSensorWatch<const W: usize> =
     &'static watch::Watch<NoopRawMutex, TempSensorReading, W>;
 pub type TempSensorDynSender = watch::DynSender<'static, TempSensorReading>;
 pub type TempSensorDynReceiver = watch::DynReceiver<'static, TempSensorReading>;
 
-pub type TempSensorReading = Result<SensorData, DS18B20Error>;
+pub type TempSensorReading = Result<SensorData, Ds18b20Error>;
 
 pub fn init<const WATCHERS: usize>() -> TempSensorWatch<WATCHERS> {
     Box::leak(Box::new(watch::Watch::new()))
@@ -41,12 +39,13 @@ pub async fn temp_sensor(
         Timer::after(TEMP_MEASUREMENT_INTERVAL).await;
 
         // Attempt to catch errors from 1Wire.
-        let sensor_reading: Result<SensorData, DS18B20Error> = async {
+        let sensor_reading: Result<SensorData, Ds18b20Error> = async {
             // Begin a measurement and wait for it to complete.
             sensor.start_temp_measurement()?;
 
             // 12bit resolution is the default, expects a 750ms wait time.
-            let wait_time = Resolution::Bits12.max_measurement_time();
+            let wait_time_ms = Resolution::Bits12.measurement_time_ms();
+            let wait_time = Duration::from_millis(wait_time_ms as u64);
             Timer::after(wait_time).await;
 
             let data = sensor.read_sensor_data()?;

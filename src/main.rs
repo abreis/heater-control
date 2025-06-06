@@ -11,9 +11,7 @@ use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 
-mod ds18b20;
 mod memlog;
-mod onewire;
 mod task;
 
 #[esp_hal_embassy::main]
