@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel, signal};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel, watch};
 use embassy_time::{Duration, Timer};
 use esp_hal::gpio;
 
@@ -12,7 +12,9 @@ pub enum SsrCommand {
     Unlock,
 }
 
-pub type SsrDutySignal = &'static signal::Signal<NoopRawMutex, u8>;
+pub type SsrDutyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u8, W>;
+pub type SsrDutyDynSender = watch::DynSender<'static, u8>;
+pub type SsrDutyDynReceiver = watch::DynReceiver<'static, u8>;
 pub type SsrCommandChannel = &'static channel::Channel<NoopRawMutex, SsrCommand, 1>;
 pub type SsrCommandChannelSender = channel::DynamicSender<'static, SsrCommand>;
 pub type SsrCommandChannelReceiver = channel::DynamicReceiver<'static, SsrCommand>;
@@ -24,9 +26,9 @@ pub type SsrCommandChannelReceiver = channel::DynamicReceiver<'static, SsrComman
 const PATTERN_STEP_DURATION: Duration = Duration::from_millis(200);
 
 /// Takes a const that sets the maximum number of watchers.
-pub fn init<const WATCHERS: usize>() -> (SsrDutySignal, SsrCommandChannel) {
+pub fn init<const WATCHERS: usize>() -> (SsrDutyWatch<WATCHERS>, SsrCommandChannel) {
     (
-        Box::leak(Box::new(signal::Signal::new())),
+        Box::leak(Box::new(watch::Watch::new())),
         Box::leak(Box::new(channel::Channel::new())),
     )
 }
@@ -34,7 +36,7 @@ pub fn init<const WATCHERS: usize>() -> (SsrDutySignal, SsrCommandChannel) {
 #[embassy_executor::task]
 pub async fn ssr_control(
     mut ssrcontrol_pin: gpio::Output<'static>,
-    ssrcontrol_duty_signal: SsrDutySignal,
+    mut ssrcontrol_duty_receiver: SsrDutyDynReceiver,
     ssrcontrol_command_receiver: SsrCommandChannelReceiver,
 ) {
     // Generate an initial pattern for 0% duty cycle.
@@ -69,7 +71,7 @@ pub async fn ssr_control(
             // Since the pattern is evenly distributed, this puts us right into the
             // new duty cycle.
             if !is_locked {
-                if let Some(new_duty_cycle) = ssrcontrol_duty_signal.try_take() {
+                if let Some(new_duty_cycle) = ssrcontrol_duty_receiver.try_changed() {
                     pattern = generate_evenly_distributed_steps(new_duty_cycle);
                 }
             }

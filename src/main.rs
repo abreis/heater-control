@@ -73,7 +73,7 @@ async fn main(spawner: Spawner) {
     let netstatus_watch = task::net_monitor::init::<4>();
 
     // Get a watcher to notify the SSR controller of a new duty cycle.
-    let (ssrcontrol_duty_signal, ssrcontrol_command_channel) = task::ssr_control::init::<4>();
+    let (ssrcontrol_duty_watch, ssrcontrol_command_channel) = task::ssr_control::init::<4>();
 
     //
     // Spawn tasks.
@@ -93,7 +93,7 @@ async fn main(spawner: Spawner) {
         // Control the SSR duty cycle.
         spawner.spawn(task::ssr_control::ssr_control(
             pin_control_ssr,
-            ssrcontrol_duty_signal,
+            ssrcontrol_duty_watch.dyn_receiver().unwrap(),
             ssrcontrol_command_channel.dyn_receiver(),
         ))?;
 
@@ -109,7 +109,8 @@ async fn main(spawner: Spawner) {
             peripherals.UART0.into(),
             pin_uart_rx.into(),
             pin_uart_tx.into(),
-            ssrcontrol_duty_signal,
+            ssrcontrol_duty_watch.dyn_sender(),
+            ssrcontrol_duty_watch.dyn_receiver().unwrap(),
             ssrcontrol_command_channel.dyn_sender(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
@@ -120,7 +121,8 @@ async fn main(spawner: Spawner) {
         task::httpd::launch_workers(
             spawner,
             net_stack,
-            ssrcontrol_duty_signal,
+            ssrcontrol_duty_watch.dyn_sender(),
+            ssrcontrol_duty_watch.dyn_receiver().unwrap(),
             ssrcontrol_command_channel.dyn_sender(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),

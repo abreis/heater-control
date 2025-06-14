@@ -2,7 +2,9 @@
 use super::{net_monitor::NetStatusDynReceiver, temp_sensor::TempSensorDynReceiver};
 use crate::{
     memlog::{self, SharedLogger},
-    task::ssr_control::{SsrCommand, SsrCommandChannelSender, SsrDutySignal},
+    task::ssr_control::{
+        SsrCommand, SsrCommandChannelSender, SsrDutyDynReceiver, SsrDutyDynSender,
+    },
 };
 use alloc::{format, string::String};
 use embassy_futures::select;
@@ -37,7 +39,8 @@ pub async fn serial_console(
     peripheral_uart: uart::AnyUart<'static>,
     pin_uart_rx: gpio::AnyPin<'static>,
     pin_uart_tx: gpio::AnyPin<'static>,
-    ssrcontrol_duty_signal: SsrDutySignal,
+    mut ssrcontrol_duty_sender: SsrDutyDynSender,
+    mut ssrcontrol_duty_receiver: SsrDutyDynReceiver,
     ssrcontrol_command_sender: SsrCommandChannelSender,
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
@@ -72,7 +75,8 @@ pub async fn serial_console(
                 cli_parser(
                     line,
                     &mut uart,
-                    ssrcontrol_duty_signal,
+                    &mut ssrcontrol_duty_sender,
+                    &mut ssrcontrol_duty_receiver,
                     ssrcontrol_command_sender,
                     &mut netstatus_receiver,
                     &mut tempsensor_receiver,
@@ -98,7 +102,8 @@ pub async fn serial_console(
 async fn cli_parser(
     line: &str,
     uart: &mut uart::Uart<'static, Async>,
-    ssrcontrol_duty_signal: SsrDutySignal,
+    ssrcontrol_duty_sender: &mut SsrDutyDynSender,
+    ssrcontrol_duty_receiver: &mut SsrDutyDynReceiver,
     ssrcontrol_command_sender: SsrCommandChannelSender,
     netstatus_receiver: &mut NetStatusDynReceiver,
     tempsensor_receiver: &mut TempSensorDynReceiver,
@@ -131,7 +136,7 @@ async fn cli_parser(
             Some(duty_str) => match duty_str.parse::<u8>() {
                 Ok(duty_value) => {
                     if (0..=100).contains(&duty_value) {
-                        ssrcontrol_duty_signal.signal(duty_value);
+                        ssrcontrol_duty_sender.send(duty_value);
                         "Relay duty set"
                     } else {
                         "Relay duty value must be between 0 and 100"
@@ -139,7 +144,10 @@ async fn cli_parser(
                 }
                 Err(_parse_error) => "Failed to parse relay duty value.",
             },
-            None => "Relay duty value required for 'ssr pwm'",
+            None => {
+                let duty = ssrcontrol_duty_receiver.try_get();
+                &format!("{:?}", duty)
+            }
         },
         (Some("ssr"), Some("command")) => match chunks.next() {
             Some("lock") => {

@@ -1,7 +1,9 @@
 use super::{net_monitor::NetStatusDynReceiver, temp_sensor::TempSensorDynReceiver};
 use crate::{
     memlog::{self, SharedLogger},
-    task::ssr_control::{SsrCommand, SsrCommandChannelSender, SsrDutySignal},
+    task::ssr_control::{
+        SsrCommand, SsrCommandChannelSender, SsrDutyDynReceiver, SsrDutyDynSender,
+    },
 };
 use alloc::{
     boxed::Box,
@@ -43,14 +45,16 @@ pub const HTTPD_CONFIG: Config<Duration> =
 pub fn launch_workers(
     spawner: Spawner,
     stack: embassy_net::Stack<'static>,
-    ssrcontrol_duty_signal: SsrDutySignal,
+    ssrcontrol_duty_sender: SsrDutyDynSender,
+    ssrcontrol_duty_receiver: SsrDutyDynReceiver,
     ssrcontrol_command_sender: SsrCommandChannelSender,
     netstatus_receiver: NetStatusDynReceiver,
     tempsensor_receiver: TempSensorDynReceiver,
     memlog: SharedLogger,
 ) -> Result<(), SpawnError> {
     let app = AppProps {
-        ssrcontrol_duty_signal,
+        ssrcontrol_duty_sender,
+        ssrcontrol_duty_receiver,
         ssrcontrol_command_sender,
         netstatus_receiver,
         tempsensor_receiver,
@@ -93,7 +97,8 @@ pub async fn worker(
 // HTTP routing.
 
 struct AppProps {
-    ssrcontrol_duty_signal: SsrDutySignal,
+    ssrcontrol_duty_sender: SsrDutyDynSender,
+    ssrcontrol_duty_receiver: SsrDutyDynReceiver,
     ssrcontrol_command_sender: SsrCommandChannelSender,
     netstatus_receiver: NetStatusDynReceiver,
     tempsensor_receiver: TempSensorDynReceiver,
@@ -110,7 +115,8 @@ impl AppBuilder for AppProps {
             .route(
                 "/help",
                 get(|| async {
-                    "GET /ssr/pwm/<duty>\n\
+                    "GET /ssr/pwm\n\
+                     GET /ssr/pwm/<duty>\n\
                      GET /ssr/command/{lock,unlock}\n\
                      GET /temp\n\
                      GET /net\n\
@@ -137,11 +143,18 @@ impl AppBuilder for AppProps {
                 ("/ssr/pwm", parse_path_segment()),
                 get(move |duty: u8| async move {
                     if (0u8..=100).contains(&duty) {
-                        app.lock().await.ssrcontrol_duty_signal.signal(duty);
+                        app.lock().await.ssrcontrol_duty_sender.send(duty);
                         format!("SSR duty set to {duty}\n")
                     } else {
                         "SSR duty must be in the [0,100] range\n".to_string()
                     }
+                }),
+            )
+            .route(
+                "/ssr/pwm",
+                get(|| async {
+                    let value = app.lock().await.ssrcontrol_duty_receiver.try_get();
+                    format!("{:#?}\n", value)
                 }),
             )
             .route(
