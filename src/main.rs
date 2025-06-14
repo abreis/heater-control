@@ -12,6 +12,7 @@ use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 
 mod memlog;
+mod state;
 mod task;
 
 #[esp_hal_embassy::main]
@@ -74,6 +75,9 @@ async fn main(spawner: Spawner) {
 
     // Get a watcher to notify the SSR controller of a new duty cycle.
     let (ssrcontrol_duty_watch, ssrcontrol_command_channel) = task::ssr_control::init::<4>();
+
+    // Allocate a shared heater state.
+    let state = state::init();
 
     //
     // Spawn tasks.

@@ -71,6 +71,10 @@ noline = { version = "0.5.1", features = ["alloc"] }
 picoserve = { version = "0.16.0", features = ["alloc", "embassy"] }
 esp-onewire = { git = "https://github.com/abreis/esp-onewire", tag = "v0.9.0" }
 esp-ds18b20 = { git = "https://github.com/abreis/esp-ds18b20", tag = "v0.9.0" }
+arrayvec = { version = "0.7.6", default-features = false, features = ["serde"] }
+serde = { version = "1.0.219", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0.140", default-features = false, features = ["alloc"] }
+thiserror = { version = "2.0.12", default-features = false }
 
 [profile.dev]
 opt-level = "s"
