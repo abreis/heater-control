@@ -18,7 +18,7 @@ mod task;
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    // let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_240MHz);
+    // let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_240MHz);
     let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
     let peripherals = esp_hal::init(esp_config);
     esp_alloc::heap_allocator!(size: 72 * 1024);
@@ -122,9 +122,8 @@ async fn main(spawner: Spawner) {
             memlog,
         ))?;
 
-        // Launch httpd workers.
-        task::httpd::launch_workers(
-            spawner,
+        // Run the httpd server.
+        spawner.spawn(task::httpd::run(
             net_stack,
             ssrcontrol_duty_watch.dyn_sender(),
             ssrcontrol_duty_watch.dyn_receiver().unwrap(),
@@ -132,7 +131,7 @@ async fn main(spawner: Spawner) {
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
-        )?;
+        ))?;
 
         Ok(())
     }()
