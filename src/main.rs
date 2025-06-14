@@ -12,6 +12,7 @@ use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 
 mod memlog;
+mod remote;
 mod state;
 mod task;
 
