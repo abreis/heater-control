@@ -60,7 +60,7 @@ impl HeaterControlState {
     }
 
     pub fn is_manual(&self) -> bool {
-        matches!(self.state, HeaterState::Manual { .. })
+        matches!(self.state, HeaterState::Manual)
     }
 
     pub fn is_off(&self) -> bool {
@@ -109,7 +109,7 @@ impl HeaterControlState {
     /// remote took possession.
     pub fn remote_update_duty(
         &mut self,
-        remote_id: &str,
+        remote_id: impl Into<ArrayString<8>>,
         heater_duty: u8,
     ) -> Result<(), StateError> {
         if let HeaterState::Remote {
@@ -118,7 +118,8 @@ impl HeaterControlState {
         } = &mut self.state
         {
             // See if the requesting remote is the one controlling the heater.
-            if current_remote.as_str() != remote_id {
+            let remote_id = remote_id.into();
+            if *current_remote != remote_id {
                 return Err(StateError::RemoteMismatch);
             }
 

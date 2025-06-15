@@ -12,7 +12,7 @@ use embedded_io_async::{Read, Write};
 use crate::{
     memlog::{self, SharedLogger},
     remote::{RemoteControlRequest, RemoteControlResponse},
-    state::{SharedState, StateError},
+    state::SharedState,
     task::{
         net_monitor::NetStatusDynReceiver,
         ssr_control::{SsrCommand, SsrCommandChannelSender, SsrDutyDynReceiver, SsrDutyDynSender},
@@ -201,7 +201,7 @@ impl Handler for HttpHandler {
                 // POST /remote
                 (Post, Some("remote"), None) => {
                     // Note: we bypass the content handling below, return JSON ourselves.
-                    remote_handle(connection).await?;
+                    remote_handle(self, connection).await?;
                     return Ok(());
                 }
 
@@ -249,7 +249,8 @@ impl Handler for HttpHandler {
     }
 }
 
-async fn remote_handle<'t, T, const N: usize>(
+async fn remote_handle<T, const N: usize>(
+    handler: &HttpHandler,
     connection: &mut Connection<'_, T, N>,
 ) -> Result<(), Error<T::Error>>
 where
@@ -293,8 +294,9 @@ where
             let error_msg = format!("deserialization error: {error}");
             connection.write_all(error_msg.as_bytes()).await
         }
-        Ok(_) => {
-            let response = RemoteControlResponse::Error(StateError::RemoteExpired);
+        Ok(request) => {
+            let response: Result<RemoteControlResponse, RemoteControlResponse> =
+                handle_remote_request(handler, request).await;
             let serialized = serde_json::to_vec(&response).unwrap();
 
             connection
@@ -302,5 +304,26 @@ where
                 .await?;
             connection.write_all(serialized.as_slice()).await
         }
+    }
+}
+
+async fn handle_remote_request(
+    handler: &HttpHandler,
+    request: RemoteControlRequest,
+) -> Result<RemoteControlResponse, RemoteControlResponse> {
+    match request {
+        RemoteControlRequest::Ping => Ok(RemoteControlResponse::Ok),
+        RemoteControlRequest::Init { id } => {
+            handler.state.lock().await.transition_to_remote(id);
+            handler.memlog.info(format!("remote initialized, id: {id}"));
+            Ok(RemoteControlResponse::Ok)
+        }
+        RemoteControlRequest::UpdateDuty { id, duty } => handler
+            .state
+            .lock()
+            .await
+            .remote_update_duty(id, duty)
+            .map(|_| RemoteControlResponse::Ok)
+            .map_err(RemoteControlResponse::Error),
     }
 }

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum RemoteControlRequest {
+    Ping,
     Init { id: ArrayString<8> },
     UpdateDuty { id: ArrayString<8>, duty: u8 },
 }
