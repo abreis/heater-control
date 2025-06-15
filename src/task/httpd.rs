@@ -12,7 +12,7 @@ use embedded_io_async::{Read, Write};
 use crate::{
     memlog::{self, SharedLogger},
     remote::{RemoteControlRequest, RemoteControlResponse},
-    state::StateError,
+    state::{SharedState, StateError},
     task::{
         net_monitor::NetStatusDynReceiver,
         ssr_control::{SsrCommand, SsrCommandChannelSender, SsrDutyDynReceiver, SsrDutyDynSender},
@@ -39,6 +39,7 @@ pub async fn run(
     netstatus_receiver: NetStatusDynReceiver,
     tempsensor_receiver: TempSensorDynReceiver,
     memlog: SharedLogger,
+    state: SharedState,
 ) {
     let buffers = TcpBuffers::<HTTPD_HANDLERS, HTTPD_BUF_SIZE, HTTPD_BUF_SIZE>::new();
     let tcp = Tcp::new(stack, &buffers);
@@ -52,6 +53,7 @@ pub async fn run(
         netstatus_receiver: Mutex::new(netstatus_receiver),
         tempsensor_receiver: Mutex::new(tempsensor_receiver),
         memlog,
+        state,
     };
     server.run(None, acceptor, handler).await.unwrap()
 }
@@ -63,6 +65,7 @@ struct HttpHandler {
     netstatus_receiver: Mutex<NoopRawMutex, NetStatusDynReceiver>,
     tempsensor_receiver: Mutex<NoopRawMutex, TempSensorDynReceiver>,
     memlog: SharedLogger,
+    state: SharedState,
 }
 
 impl Handler for HttpHandler {
@@ -120,6 +123,7 @@ impl Handler for HttpHandler {
                     Err(_) => Err((400, "Bad Request", None)),
                     Ok(duty) => {
                         if (0u8..=100).contains(&duty) {
+                            self.state.lock().await.transition_to_manual(duty);
                             self.ssrcontrol_duty_sender.lock().await.send(duty);
                             Ok(format!("SSR duty set to {duty}\n").into())
                         } else {
@@ -196,6 +200,8 @@ impl Handler for HttpHandler {
 
                 // POST /remote
                 (Post, Some("remote"), None) => {
+                    // Note: we bypass the content handling below, return JSON ourselves.
+                    remote_handle(connection).await?;
                     return Ok(());
                 }
 
@@ -240,5 +246,61 @@ impl Handler for HttpHandler {
         // 404, "Not Found"
         // 405, "Method Not Allowed"
         // 400, "Bad Request", "cause"
+    }
+}
+
+async fn remote_handle<'t, T, const N: usize>(
+    connection: &mut Connection<'_, T, N>,
+) -> Result<(), Error<T::Error>>
+where
+    T: embedded_io_async::Read + embedded_io_async::Write,
+{
+    let (headers, body) = connection.split();
+
+    let content_type = headers.headers.get("Content-Type");
+    if content_type.is_none() {
+        connection
+            .initiate_response(400, Some("Bad Request"), &[("Content-Type", "text/plain")])
+            .await?;
+        return connection.write_all(b"missing content-type header").await;
+    }
+
+    let content_type = content_type.unwrap();
+    if content_type != "application/json" {
+        connection
+            .initiate_response(400, Some("Bad Request"), &[("Content-Type", "text/plain")])
+            .await?;
+        return connection
+            .write_all(b"expected content-type application/json")
+            .await;
+    }
+
+    // Read the message body.
+    let mut buffer = [0u8; 128];
+    let bytes_read = body.read(&mut buffer).await?;
+    if !body.is_complete() {
+        connection
+            .initiate_response(400, Some("Bad Request"), &[("Content-Type", "text/plain")])
+            .await?;
+        return connection.write_all(b"payload too large").await;
+    }
+
+    match serde_json::from_slice::<RemoteControlRequest>(&buffer[..bytes_read]) {
+        Err(error) => {
+            connection
+                .initiate_response(400, Some("Bad Request"), &[("Content-Type", "text/plain")])
+                .await?;
+            let error_msg = format!("deserialization error: {error}");
+            connection.write_all(error_msg.as_bytes()).await
+        }
+        Ok(_) => {
+            let response = RemoteControlResponse::Error(StateError::RemoteExpired);
+            let serialized = serde_json::to_vec(&response).unwrap();
+
+            connection
+                .initiate_response(200, Some("OK"), &[("Content-Type", "application/json")])
+                .await?;
+            connection.write_all(serialized.as_slice()).await
+        }
     }
 }

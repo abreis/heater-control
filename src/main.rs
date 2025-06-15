@@ -109,6 +109,13 @@ async fn main(spawner: Spawner) {
             ssrcontrol_command_channel.dyn_sender(),
         ))?;
 
+        // Shut the heater off if a remote fails to check in.
+        spawner.spawn(state::expire_remote(
+            ssrcontrol_duty_watch.dyn_sender(),
+            memlog,
+            state,
+        ))?;
+
         // Launch a control interface on UART0.
         spawner.spawn(task::serial_console(
             peripherals.UART0.into(),
@@ -120,6 +127,7 @@ async fn main(spawner: Spawner) {
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
+            state,
         ))?;
 
         // Run the httpd server.
@@ -131,6 +139,7 @@ async fn main(spawner: Spawner) {
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
+            state,
         ))?;
 
         Ok(())

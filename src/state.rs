@@ -1,14 +1,19 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, format};
 use arrayvec::ArrayString;
+use core::ops::{Deref, DerefMut};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use embassy_time::{Duration, Instant};
+use embassy_time::{Duration, Instant, Timer};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-// Remotes must check in periodically or the heater shuts off.
-pub const HEATER_CHECKIN_INTERVAL: Duration = Duration::from_secs(60);
+use crate::{memlog, task::ssr_control::SsrDutyDynSender};
 
-pub type SharedHeaterState = &'static Mutex<NoopRawMutex, HeaterControlState>;
+// Remotes must check in periodically or the heater shuts off.
+pub const REMOTE_CHECKIN_INTERVAL: Duration = Duration::from_secs(60);
+// How often to check for expired remotes.
+pub const CHECKIN_EXPIRE_INTERVAL: Duration = Duration::from_secs(10);
+
+pub type SharedState = &'static Mutex<NoopRawMutex, HeaterControlState>;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HeaterControlState {
@@ -31,10 +36,24 @@ pub enum HeaterState {
     Manual,
 }
 
-pub fn init() -> SharedHeaterState {
+impl Deref for HeaterControlState {
+    type Target = HeaterState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+impl DerefMut for HeaterControlState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
+}
+
+pub fn init() -> SharedState {
     Box::leak(Box::new(Mutex::new(HeaterControlState::default())))
 }
 
+#[allow(dead_code)]
 impl HeaterControlState {
     pub fn is_remote(&self) -> bool {
         matches!(self.state, HeaterState::Remote { .. })
@@ -79,7 +98,7 @@ impl HeaterControlState {
     pub fn transition_to_remote(&mut self, remote_id: impl Into<ArrayString<8>>) {
         self.state = HeaterState::Remote {
             remote_id: remote_id.into(),
-            expires: Instant::now() + HEATER_CHECKIN_INTERVAL,
+            expires: Instant::now() + REMOTE_CHECKIN_INTERVAL,
         }
     }
 
@@ -114,7 +133,7 @@ impl HeaterControlState {
             self.duty = heater_duty;
 
             // Set a new expiry time.
-            *expires = Instant::now() + HEATER_CHECKIN_INTERVAL;
+            *expires = Instant::now() + REMOTE_CHECKIN_INTERVAL;
 
             Ok(())
         } else {
@@ -131,4 +150,25 @@ pub enum StateError {
     RemoteMismatch,
     #[error("the remote failed to check in and has expired")]
     RemoteExpired,
+}
+
+// Periodically checks if a remote has expired, and sets the heater duty to zero.
+#[embassy_executor::task]
+pub async fn expire_remote(
+    ssrcontrol_duty_sender: SsrDutyDynSender,
+    memlog: memlog::SharedLogger,
+    state: SharedState,
+) {
+    loop {
+        Timer::after(CHECKIN_EXPIRE_INTERVAL).await;
+
+        let mut state = state.lock().await;
+        if let HeaterState::Remote { remote_id, expires } = **state {
+            if Instant::now().checked_duration_since(expires).is_some() {
+                ssrcontrol_duty_sender.send(0);
+                state.transition_to_off();
+                memlog.warn(format!("remote {remote_id} expired, duty set to 0"));
+            }
+        }
+    }
 }

@@ -1,7 +1,6 @@
 use crate::state::StateError;
 use arrayvec::ArrayString;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum RemoteControlRequest {
@@ -12,11 +11,11 @@ pub enum RemoteControlRequest {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum RemoteControlResponse {
     Ok,
-    Error(RemoteControlError),
+    Error(StateError),
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Error)]
-pub enum RemoteControlError {
-    #[error("{0}")]
-    StateError(#[from] StateError),
-}
+// #[derive(Clone, Copy, Debug, Serialize, Deserialize, Error)]
+// pub enum RemoteControlError {
+//     #[error("{0}")]
+//     StateError(#[from] StateError),
+// }

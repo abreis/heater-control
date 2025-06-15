@@ -2,6 +2,7 @@
 use super::{net_monitor::NetStatusDynReceiver, temp_sensor::TempSensorDynReceiver};
 use crate::{
     memlog::{self, SharedLogger},
+    state::SharedState,
     task::ssr_control::{
         SsrCommand, SsrCommandChannelSender, SsrDutyDynReceiver, SsrDutyDynSender,
     },
@@ -45,6 +46,7 @@ pub async fn serial_console(
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
     memlog: SharedLogger,
+    state: SharedState,
 ) {
     // UART setup. When in loopback mode, ensure TX is configured first (#2914).
     let mut uart = uart::Uart::new(peripheral_uart, uart::Config::default())
@@ -81,6 +83,7 @@ pub async fn serial_console(
                     &mut netstatus_receiver,
                     &mut tempsensor_receiver,
                     memlog,
+                    state,
                 )
                 .await?;
             }
@@ -108,6 +111,7 @@ async fn cli_parser(
     netstatus_receiver: &mut NetStatusDynReceiver,
     tempsensor_receiver: &mut TempSensorDynReceiver,
     memlog: SharedLogger,
+    state: SharedState,
 ) -> Result<(), uart::TxError> {
     // Get the command from the first argument.
     let mut chunks = line.split_whitespace();
@@ -134,9 +138,10 @@ async fn cli_parser(
         // SSR control.
         (Some("ssr"), Some("pwm")) => match chunks.next() {
             Some(duty_str) => match duty_str.parse::<u8>() {
-                Ok(duty_value) => {
-                    if (0..=100).contains(&duty_value) {
-                        ssrcontrol_duty_sender.send(duty_value);
+                Ok(duty) => {
+                    if (0..=100).contains(&duty) {
+                        state.lock().await.transition_to_manual(duty);
+                        ssrcontrol_duty_sender.send(duty);
                         "Relay duty set"
                     } else {
                         "Relay duty value must be between 0 and 100"
