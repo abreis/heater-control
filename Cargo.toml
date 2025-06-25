@@ -58,7 +58,6 @@ esp-wifi = { version = "0.14.1", features = [
     # "log",
 ] }
 
-arrayvec = { version = "0.7.6", default-features = false, features = ["serde"] }
 esp-onewire = { git = "https://github.com/abreis/esp-onewire", tag = "v0.9.0" }
 esp-ds18b20 = { git = "https://github.com/abreis/esp-ds18b20", tag = "v0.9.0" }
 noline = { version = "0.5.1", features = ["alloc"] }

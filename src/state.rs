@@ -1,5 +1,4 @@
-use alloc::{boxed::Box, format};
-use arrayvec::ArrayString;
+use alloc::{boxed::Box, format, string::String};
 use core::ops::{Deref, DerefMut};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant, Timer};
@@ -14,20 +13,20 @@ pub const CHECKIN_EXPIRE_INTERVAL: Duration = Duration::from_secs(10);
 
 pub type SharedState = &'static Mutex<NoopRawMutex, HeaterControlState>;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct HeaterControlState {
     duty: u8,
     state: HeaterState,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub enum HeaterState {
     #[default]
     Off,
     // The heater is being controlled by a remote.
     Remote {
         // An identifier for the remote that is actively controlling the heater.
-        remote_id: ArrayString<8>,
+        remote_id: String,
         // Automatically turn off the heater if a remote has not been seen for some time.
         expires: embassy_time::Instant,
     },
@@ -90,62 +89,56 @@ impl HeaterControlState {
         self.state = HeaterState::Manual;
     }
 
-    /// Transition to Remote.
-    ///
-    /// New remotes override active remotes, causing the former remote to
-    /// receive an error message on the next update.
-    pub fn transition_to_remote(&mut self, remote_id: impl Into<ArrayString<8>>) {
-        self.state = HeaterState::Remote {
-            remote_id: remote_id.into(),
-            expires: Instant::now() + REMOTE_CHECKIN_INTERVAL,
-        }
-    }
-
     /// Updates the duty cycle set by a remote.
     ///
     /// Returns an error if the requesting remote is not the active remote,
-    /// whether because it has failed to check in on time, or because another
-    /// remote took possession.
+    /// whether because it has failed to check in on time.
     pub fn remote_update_duty(
         &mut self,
-        remote_id: impl Into<ArrayString<8>>,
+        remote_id: impl Into<String>,
         heater_duty: u8,
     ) -> Result<(), StateError> {
-        if let HeaterState::Remote {
-            remote_id: current_remote,
-            expires,
-        } = &mut self.state
-        {
-            // See if the requesting remote is the one controlling the heater.
-            let remote_id = remote_id.into();
-            if *current_remote != remote_id {
-                return Err(StateError::RemoteMismatch);
+        match &mut self.state {
+            HeaterState::Off | HeaterState::Manual => {
+                // Set the mode to remote, record the remote identifier.
+                self.state = HeaterState::Remote {
+                    remote_id: remote_id.into(),
+                    expires: Instant::now() + REMOTE_CHECKIN_INTERVAL,
+                };
+                Ok(())
             }
 
-            // See if the expiry time has elapsed.
-            // We use checked_duration_since because if `expires` is in the future, a regular duration
-            // calculation would underflow since Duration is unsigned.
-            if Instant::now().checked_duration_since(*expires).is_some() {
-                return Err(StateError::RemoteExpired);
+            HeaterState::Remote {
+                remote_id: current_remote,
+                expires,
+            } => {
+                // See if the requesting remote is the one controlling the heater.
+                let remote_id = remote_id.into();
+                if *current_remote != remote_id {
+                    return Err(StateError::RemoteMismatch);
+                }
+
+                // See if the expiry time has elapsed.
+                // We use checked_duration_since because if `expires` is in the future, a regular duration
+                // calculation would underflow since Duration is unsigned.
+                if Instant::now().checked_duration_since(*expires).is_some() {
+                    return Err(StateError::RemoteExpired);
+                }
+
+                // Update the recorded duty.
+                self.duty = heater_duty;
+
+                // Set a new expiry time.
+                *expires = Instant::now() + REMOTE_CHECKIN_INTERVAL;
+
+                Ok(())
             }
-
-            // Update the recorded duty.
-            self.duty = heater_duty;
-
-            // Set a new expiry time.
-            *expires = Instant::now() + REMOTE_CHECKIN_INTERVAL;
-
-            Ok(())
-        } else {
-            Err(StateError::RemoteNotInitialized)
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Error)]
 pub enum StateError {
-    #[error("remote not initialized")]
-    RemoteNotInitialized,
     #[error("the heater is being controlled by another remote")]
     RemoteMismatch,
     #[error("the remote failed to check in and has expired")]
@@ -163,8 +156,10 @@ pub async fn expire_remote(
         Timer::after(CHECKIN_EXPIRE_INTERVAL).await;
 
         let mut state = state.lock().await;
-        if let HeaterState::Remote { remote_id, expires } = **state {
-            if Instant::now().checked_duration_since(expires).is_some() {
+        if let HeaterState::Remote { remote_id, expires } = &state.state {
+            let remote_id = remote_id.clone();
+
+            if Instant::now().checked_duration_since(*expires).is_some() {
                 ssrcontrol_duty_sender.send(0);
                 state.transition_to_off();
                 memlog.warn(format!("remote {remote_id} expired, duty set to 0"));

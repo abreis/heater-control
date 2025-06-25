@@ -1,9 +1,10 @@
 use crate::{
-    futures::{Either6, select6},
+    futures::{Either7, select7},
     memlog::SharedLogger,
+    state::SharedState,
     task::{
         net_monitor::NetStatusDynReceiver,
-        ssr_control::{SsrDutyDynReceiver, SsrDutyDynSender},
+        ssr_control::{SsrCommandSubscriber, SsrDutyDynReceiver, SsrDutyDynSender},
         temp_sensor::TempSensorDynReceiver,
     },
 };
@@ -13,13 +14,18 @@ use alloc::{
 };
 use const_format::concatcp;
 use embassy_net::{IpAddress, IpEndpoint, dns::DnsQueryType, tcp::TcpSocket};
+use embassy_sync::pubsub::WaitResult;
 use embassy_time::Timer;
 use mountain_mqtt::{
     client::{
         Client, ClientError, ClientNoQueue, ClientReceivedEvent, ConnectionSettings, EventHandler,
         EventHandlerError,
     },
-    data::quality_of_service::QualityOfService,
+    data::{
+        property::{Property, PublishProperty},
+        quality_of_service::QualityOfService,
+        string_pair::StringPair,
+    },
     embedded_io_async::ConnectionEmbedded,
     packets::connect::Will,
 };
@@ -118,7 +124,9 @@ pub async fn run(
     mut ssrcontrol_duty_receiver: SsrDutyDynReceiver,
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
+    mut ssrcontrol_command_subscriber: SsrCommandSubscriber,
     memlog: SharedLogger,
+    state: SharedState,
 ) {
     let broker_addr = 'dns: loop {
         match stack.dns_query(MQTT_SERVER_ADDR, DnsQueryType::A).await {
@@ -147,6 +155,8 @@ pub async fn run(
             let delay = MqttDelay;
             let event_handler = MqttHandler {
                 ssrcontrol_duty_sender: ssrcontrol_duty_sender.clone(),
+                memlog,
+                state,
             };
 
             match connect_to_broker(
@@ -199,18 +209,20 @@ pub async fn run(
                     let temp_fut = tempsensor_receiver.changed();
                     let net_fut = netstatus_receiver.changed();
                     let log_fut = logwatch_receiver.changed();
+                    let ssrcmd_fut = ssrcontrol_command_subscriber.next_message();
 
-                    match select6(
+                    match select7(
                         duty_fut,
                         temp_fut,
                         net_fut,
                         log_fut,
+                        ssrcmd_fut,
                         &mut ping_fut,
                         &mut poll_fut,
                     )
                     .await
                     {
-                        Either6::First(duty) => {
+                        Either7::First(duty) => {
                             let topic_duty_state = concatcp!(
                                 MQTT_TOPIC_ROOT,
                                 '/',
@@ -228,7 +240,7 @@ pub async fn run(
                         }
 
                         // Publish case temperature sensor readings.
-                        Either6::Second(temp) => {
+                        Either7::Second(temp) => {
                             if let Ok(data) = temp {
                                 let topic_temp_case = concatcp!(
                                     MQTT_TOPIC_ROOT,
@@ -248,7 +260,7 @@ pub async fn run(
                         }
 
                         // Publish network status updates.
-                        Either6::Third(net) => {
+                        Either7::Third(net) => {
                             let topic_net =
                                 concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/net");
                             mqtt_client
@@ -262,7 +274,7 @@ pub async fn run(
                         }
 
                         // Publish logs.
-                        Either6::Fourth(log) => {
+                        Either7::Fourth(log) => {
                             let topic_log =
                                 concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/log");
                             mqtt_client
@@ -275,14 +287,34 @@ pub async fn run(
                                 .await?;
                         }
 
+                        // Publish SSR commands.
+                        Either7::Fifth(ssr_cmd) => {
+                            if let WaitResult::Message(cmd) = ssr_cmd {
+                                let topic_log = concatcp!(
+                                    MQTT_TOPIC_ROOT,
+                                    '/',
+                                    MQTT_TOPIC_DEVICE_NAME,
+                                    "/ssr_cmd"
+                                );
+                                mqtt_client
+                                    .publish(
+                                        topic_log,
+                                        format!("{cmd:?}").as_bytes(),
+                                        QualityOfService::Qos0,
+                                        false,
+                                    )
+                                    .await?;
+                            }
+                        }
+
                         // Periodically send a ping to the server.
-                        Either6::Fifth(_ping) => {
+                        Either7::Sixth(_ping) => {
                             mqtt_client.send_ping().await?;
                             ping_fut = Timer::after_secs(10);
                         }
 
                         // Periodic poll for MQTT messages.
-                        Either6::Sixth(_timeout) => {
+                        Either7::Seventh(_timeout) => {
                             mqtt_client.poll(false).await?;
                             poll_fut = Timer::after_secs(1);
                         }
@@ -308,6 +340,8 @@ pub async fn run(
 
 struct MqttHandler {
     ssrcontrol_duty_sender: SsrDutyDynSender,
+    memlog: SharedLogger,
+    state: SharedState,
 }
 
 impl<const P: usize> EventHandler<P> for MqttHandler {
@@ -328,16 +362,56 @@ impl<const P: usize> EventHandler<P> for MqttHandler {
                 .parse()
                 .map_err(|_| EventHandlerError::InvalidApplicationMessage)?;
 
-            if (0..=100).contains(&duty) {
-                self.ssrcontrol_duty_sender.send(duty);
-                Ok(())
-            } else {
-                Err(EventHandlerError::UnexpectedApplicationMessage)
+            if !((0..=100).contains(&duty)) {
+                return Err(EventHandlerError::UnexpectedApplicationMessage);
             }
-        }
-        // Unrecognized topics.
-        else {
+
+            // Is there a UserProperty "remote:<id>" indicating that the duty setter is a remote?
+            let control_remote = find_user_property(&message.properties, "remote", None)
+                .map(|property| property.value());
+
+            if let Some(remote_id) = control_remote {
+                // The duty sender is a remote.
+                let state_result = self.state.lock().await.remote_update_duty(remote_id, duty);
+
+                if let Err(error) = state_result {
+                    self.memlog.warn(format!("state error: {error}"));
+                    return Err(EventHandlerError::UnexpectedApplicationMessage);
+                }
+            } else {
+                // No remote indicator means the duty setting is "manual".
+                self.state.lock().await.transition_to_manual(duty);
+            }
+
+            self.ssrcontrol_duty_sender.send(duty);
+            Ok(())
+        } else {
+            // Unrecognized topics.
             Err(EventHandlerError::UnexpectedApplicationMessageTopic)
         }
     }
+}
+
+fn find_user_property<'a, 'p, const N: usize>(
+    properties: &'a heapless::Vec<PublishProperty<'p>, N>,
+    name: &str,
+    value: Option<&str>,
+) -> Option<StringPair<'p>> {
+    properties.iter().find_map(|property| {
+        let PublishProperty::UserProperty(user_property) = property else {
+            return None;
+        };
+
+        if user_property.value().name() != name {
+            return None;
+        }
+
+        if let Some(value) = value {
+            if user_property.value().value() != value {
+                return None;
+            }
+        }
+
+        Some(user_property.value())
+    })
 }

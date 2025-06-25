@@ -79,7 +79,9 @@ async fn main(spawner: Spawner) {
     let netstatus_watch = task::net_monitor::init::<3>();
 
     // Get a watcher to notify the SSR controller of a new duty cycle.
-    let (ssrcontrol_duty_watch, ssrcontrol_command_channel) = task::ssr_control::init::<3>();
+    // Command publishers: serial console, temp sensor.
+    // Command subscribers: ssr control, mqtt client.
+    let (ssrcontrol_duty_watch, ssrcontrol_command_pubsub) = task::ssr_control::init::<3, 2, 2>();
 
     // Allocate a shared heater state.
     let state = state::init();
@@ -103,14 +105,14 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::ssr_control::ssr_control(
             pin_control_ssr,
             ssrcontrol_duty_watch.dyn_receiver().unwrap(),
-            ssrcontrol_command_channel.dyn_receiver(),
+            ssrcontrol_command_pubsub.dyn_subscriber().unwrap(),
         ))?;
 
         // Take a temperature measurement periodically.
         spawner.spawn(task::temp_sensor(
             pin_sensor_temp.into(),
             tempsensor_watch.dyn_sender(),
-            ssrcontrol_command_channel.dyn_sender(),
+            ssrcontrol_command_pubsub.dyn_publisher().unwrap(),
         ))?;
 
         // Shut the heater off if a remote fails to check in.
@@ -127,7 +129,7 @@ async fn main(spawner: Spawner) {
             pin_uart_tx.into(),
             ssrcontrol_duty_watch.dyn_sender(),
             ssrcontrol_duty_watch.dyn_receiver().unwrap(),
-            ssrcontrol_command_channel.dyn_sender(),
+            ssrcontrol_command_pubsub.dyn_publisher().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
@@ -141,7 +143,9 @@ async fn main(spawner: Spawner) {
             ssrcontrol_duty_watch.dyn_receiver().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
+            ssrcontrol_command_pubsub.dyn_subscriber().unwrap(),
             memlog,
+            state,
         ))?;
 
         Ok(())

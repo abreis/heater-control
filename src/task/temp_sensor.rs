@@ -1,4 +1,4 @@
-use crate::task::ssr_control::{SsrCommand, SsrCommandChannelSender};
+use crate::task::ssr_control::{SsrCommand, SsrCommandPublisher};
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use embassy_time::{Duration, Timer};
@@ -28,7 +28,7 @@ const TEMP_LIMIT_LOW: f32 = 30.0;
 pub async fn temp_sensor(
     onewire_pin: gpio::AnyPin<'static>,
     tempsensor_sender: TempSensorDynSender,
-    ssrcontrol_command_sender: SsrCommandChannelSender,
+    ssrcontrol_command_sender: SsrCommandPublisher,
 ) {
     let onewire_bus = OneWireBus::new(onewire_pin);
     let mut sensor = Ds18b20::new(TEMP_SENSOR_ADDRESS, onewire_bus).unwrap();
@@ -59,10 +59,10 @@ pub async fn temp_sensor(
         if let Ok(SensorData { temperature, .. }) = &sensor_reading {
             if temperature_exceeded && *temperature < TEMP_LIMIT_LOW {
                 temperature_exceeded = false;
-                ssrcontrol_command_sender.send(SsrCommand::Unlock).await;
+                ssrcontrol_command_sender.publish(SsrCommand::Unlock).await;
             } else if !temperature_exceeded && *temperature >= TEMP_LIMIT_HIGH {
                 temperature_exceeded = true;
-                ssrcontrol_command_sender.send(SsrCommand::Lock).await;
+                ssrcontrol_command_sender.publish(SsrCommand::Lock).await;
             }
         }
 

@@ -4,9 +4,7 @@ use crate::{
     ESP_APP_DESC,
     memlog::{self, SharedLogger},
     state::SharedState,
-    task::ssr_control::{
-        SsrCommand, SsrCommandChannelSender, SsrDutyDynReceiver, SsrDutyDynSender,
-    },
+    task::ssr_control::{SsrCommand, SsrCommandPublisher, SsrDutyDynReceiver, SsrDutyDynSender},
 };
 use alloc::{format, string::String};
 use core::cell::LazyCell;
@@ -48,7 +46,7 @@ pub async fn serial_console(
     pin_uart_tx: gpio::AnyPin<'static>,
     mut ssrcontrol_duty_sender: SsrDutyDynSender,
     mut ssrcontrol_duty_receiver: SsrDutyDynReceiver,
-    ssrcontrol_command_sender: SsrCommandChannelSender,
+    mut ssrcontrol_command_publisher: SsrCommandPublisher,
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
     memlog: SharedLogger,
@@ -85,7 +83,7 @@ pub async fn serial_console(
                     &mut uart,
                     &mut ssrcontrol_duty_sender,
                     &mut ssrcontrol_duty_receiver,
-                    ssrcontrol_command_sender,
+                    &mut ssrcontrol_command_publisher,
                     &mut netstatus_receiver,
                     &mut tempsensor_receiver,
                     memlog,
@@ -113,7 +111,7 @@ async fn cli_parser(
     uart: &mut uart::Uart<'static, Async>,
     ssrcontrol_duty_sender: &mut SsrDutyDynSender,
     ssrcontrol_duty_receiver: &mut SsrDutyDynReceiver,
-    ssrcontrol_command_sender: SsrCommandChannelSender,
+    ssrcontrol_command_publisher: &mut SsrCommandPublisher,
     netstatus_receiver: &mut NetStatusDynReceiver,
     tempsensor_receiver: &mut TempSensorDynReceiver,
     memlog: SharedLogger,
@@ -162,11 +160,13 @@ async fn cli_parser(
         },
         (Some("ssr"), Some("command")) => match chunks.next() {
             Some("lock") => {
-                ssrcontrol_command_sender.send(SsrCommand::Lock).await;
+                ssrcontrol_command_publisher.publish(SsrCommand::Lock).await;
                 "SSR lock command sent"
             }
             Some("unlock") => {
-                ssrcontrol_command_sender.send(SsrCommand::Unlock).await;
+                ssrcontrol_command_publisher
+                    .publish(SsrCommand::Unlock)
+                    .await;
                 "SSR unlock command sent"
             }
             _ => "Relay command required",
