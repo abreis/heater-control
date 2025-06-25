@@ -8,8 +8,8 @@ use esp_wifi::{
     wifi::{self, WifiState},
 };
 
-const WIFI_SSID: &str = "definitely_not_a_honeypot";
-const WIFI_PASS: &str = "nice_try_but";
+use crate::config::WIFI_PASS;
+use crate::config::WIFI_SSID;
 // How long to wait before attempting to reconnect to WiFi.
 const WIFI_RECONNECT_PAUSE: Duration = Duration::from_secs(5);
 

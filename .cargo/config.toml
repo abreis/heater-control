@@ -1,0 +1,22 @@
+[target.xtensa-esp32s3-none-elf]
+runner = "espflash flash --monitor --chip esp32s3"
+
+[env]
+ESP_WIFI_CONFIG_COUNTRY_CODE = "NZ"
+# ESP_WIFI_CONFIG_RX_QUEUE_SIZE = 5
+# ESP_WIFI_CONFIG_TX_QUEUE_SIZE = 3
+# ESP_WIFI_CONFIG_MAX_BURST_SIZE = 1
+
+# Keeps USB running when using WiFi. This allows debugging and log
+# messages via USB Serial JTAG. Turn off for best WiFi performance.
+#
+# Warning: when disabled, G0 must be held low on boot to flash (use button or pin).
+# ESP_WIFI_CONFIG_PHY_ENABLE_USB = "false"
+
+[build]
+rustflags = ["-C", "link-arg=-nostartfiles"]
+
+target = "xtensa-esp32s3-none-elf"
+
+[unstable]
+build-std = ["alloc", "core"]

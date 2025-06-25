@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 use super::{net_monitor::NetStatusDynReceiver, temp_sensor::TempSensorDynReceiver};
 use crate::{
+    ESP_APP_DESC,
     memlog::{self, SharedLogger},
     state::SharedState,
     task::ssr_control::{
@@ -8,17 +9,22 @@ use crate::{
     },
 };
 use alloc::{format, string::String};
+use core::cell::LazyCell;
 use embassy_futures::select;
 use embassy_time::{Duration, Timer};
 use esp_hal::{Async, gpio, uart};
 
 // Number of bytes to allocate to keep a history of commands.
 const COMMAND_HISTORY_BUFFER_SIZE: usize = 1000; // in bytes
-const SERIAL_MOTD: &str = const_format::formatcp!(
-    "\r\n{} {}\r\n",
-    env!("CARGO_PKG_NAME"),
-    env!("CARGO_PKG_VERSION")
-);
+const SERIAL_MOTD: LazyCell<String> = LazyCell::new(|| {
+    format!(
+        "\r\n{} {}\r\nbuilt on {} {}\r\n",
+        ESP_APP_DESC.project_name(),
+        ESP_APP_DESC.version(),
+        ESP_APP_DESC.date(),
+        ESP_APP_DESC.time()
+    )
+});
 
 // Uart::write_async doesn't guarantee it will send everything.
 trait UartWriteAllAsync {

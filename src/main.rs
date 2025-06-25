@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![deny(clippy::mem_forget)]
 #![feature(impl_trait_in_assoc_type)]
 
 extern crate alloc;
@@ -11,10 +12,13 @@ use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 
+mod config;
+mod futures;
 mod memlog;
-mod remote;
 mod state;
 mod task;
+
+esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -66,16 +70,16 @@ async fn main(spawner: Spawner) {
     let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
 
     //
-    // Watcher count: 1 for serial console, 2 for httpd workers
+    // Watcher count: 1 for serial console, 1 for mqtt
 
     // Get a watcher to await changes in temperature sensor readings.
-    let tempsensor_watch = task::temp_sensor::init::<4>();
+    let tempsensor_watch = task::temp_sensor::init::<3>();
 
     // Get a watcher to monitor the network interface.
-    let netstatus_watch = task::net_monitor::init::<4>();
+    let netstatus_watch = task::net_monitor::init::<3>();
 
     // Get a watcher to notify the SSR controller of a new duty cycle.
-    let (ssrcontrol_duty_watch, ssrcontrol_command_channel) = task::ssr_control::init::<4>();
+    let (ssrcontrol_duty_watch, ssrcontrol_command_channel) = task::ssr_control::init::<3>();
 
     // Allocate a shared heater state.
     let state = state::init();
@@ -130,16 +134,14 @@ async fn main(spawner: Spawner) {
             state,
         ))?;
 
-        // Run the httpd server.
-        spawner.spawn(task::httpd::run(
+        // Run the MQTT client.
+        spawner.spawn(task::mqtt::run(
             net_stack,
             ssrcontrol_duty_watch.dyn_sender(),
             ssrcontrol_duty_watch.dyn_receiver().unwrap(),
-            ssrcontrol_command_channel.dyn_sender(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
-            state,
         ))?;
 
         Ok(())

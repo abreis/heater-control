@@ -8,9 +8,14 @@ Cargo.lock
 # Every directory except whitelist.
 /*/
 !/src/
+!/.cargo/
 
 # Every markdown except whitelist.
 /*.md
 !/CHANGELOG.md
 !/DESIGN.md
 !/README.md
+!/AGENT.md
+
+# Skip local settings.
+/src/config.rs

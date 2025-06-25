@@ -3,7 +3,6 @@ use arrayvec::ArrayString;
 use core::ops::{Deref, DerefMut};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant, Timer};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{memlog, task::ssr_control::SsrDutyDynSender};
@@ -143,7 +142,7 @@ impl HeaterControlState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Error)]
+#[derive(Clone, Copy, Debug, Error)]
 pub enum StateError {
     #[error("remote not initialized")]
     RemoteNotInitialized,
