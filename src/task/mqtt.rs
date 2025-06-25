@@ -151,7 +151,8 @@ pub async fn run(
 
     // We continue this loop if the mqtt client is disconnected.
     'connect: loop {
-        let mut mqtt_client = loop {
+        // Loop, attempting to reconnect
+        let mut mqtt_client = 'client_connect: loop {
             let delay = MqttDelay;
             let event_handler = MqttHandler {
                 ssrcontrol_duty_sender: ssrcontrol_duty_sender.clone(),
@@ -170,36 +171,47 @@ pub async fn run(
             )
             .await
             {
-                Ok(client) => break client,
+                Ok(client) => break 'client_connect client,
                 Err(error) => {
                     memlog.warn(format!("failed to connect to mqtt broker: {error}"));
-                    Timer::after_secs(30).await;
+                    Timer::after_secs(10).await;
+                    continue 'client_connect;
                 }
             }
         };
 
+        // Publish an 'online' status.
+        let topic_status = concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/status");
+        if mqtt_client
+            .publish(
+                topic_status,
+                "online".as_bytes(),
+                QualityOfService::Qos1,
+                true,
+            )
+            .await
+            .is_err()
+        {
+            // Something went wrong, retry the connection.
+            Timer::after_secs(10).await;
+            continue 'connect;
+        }
+
+        // Subscribe to duty cycle updates.
+        let topic_duty_set = concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/duty/set");
+        if mqtt_client
+            .subscribe(topic_duty_set, QualityOfService::Qos1)
+            .await
+            .is_err()
+        {
+            // Something went wrong, retry the connection.
+            Timer::after_secs(10).await;
+            continue 'connect;
+        }
+
         // We continue this loop if the mqtt client throws an error but did not disconnect.
         'main: loop {
             let catch: Result<(), ClientError> = async {
-                // Publish an 'online' status.
-                let topic_status =
-                    concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/status");
-                mqtt_client
-                    .publish(
-                        topic_status,
-                        "online".as_bytes(),
-                        QualityOfService::Qos1,
-                        true,
-                    )
-                    .await?;
-
-                // Subscribe to duty cycle updates.
-                let topic_duty_set =
-                    concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/duty/set");
-                mqtt_client
-                    .subscribe(topic_duty_set, QualityOfService::Qos1)
-                    .await?;
-
                 let mut ping_fut = Timer::after_secs(10);
                 // Poor API design of mountain-mqtt forces us to poll periodically.
                 let mut poll_fut = Timer::after_secs(1);
@@ -329,7 +341,7 @@ pub async fn run(
                     continue 'connect;
                 }
                 Err(error) => {
-                    memlog.info(format!("mqtt client disconnected: {error}"));
+                    memlog.info(format!("mqtt client error: {error}"));
                     continue 'main;
                 }
                 Ok(()) => (),

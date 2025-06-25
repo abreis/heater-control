@@ -245,10 +245,7 @@ async fn cli_parser(
                 .records()
                 .iter()
                 .rev()
-                .map(|record| {
-                    let timestamp = memlog::format_milliseconds_to_hms(record.instant.as_millis());
-                    format!("[{}] {}: {}\r\n", timestamp, record.level, record.text)
-                })
+                .map(|record| format!("{}\r\n", record))
                 .collect::<String>()
         }
         (Some("log"), Some("clear")) => {

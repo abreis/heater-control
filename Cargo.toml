@@ -14,24 +14,22 @@ doctest = false
 
 [dependencies]
 critical-section = "1.2.0"
-edge-http = "0.6.0"
-edge-nal = "0.5.0"
-edge-nal-embassy = "0.6.0"
+# Enabling nightly statically allocates the tasks, no arena is used.
+embassy-executor = { version = "0.7.0", features = ["nightly"] }
 embassy-futures = "0.1.1"
 embassy-net = { version = "0.7.0", features = [
     "dhcpv4",
     "medium-ethernet",
     "tcp",
     "udp",
+    "dns",
+    "icmp",
 ] }
 embassy-sync = "0.7.0"
-# Enabling nightly statically allocates the tasks, no arena is used.
-embassy-executor = { version = "0.7.0", features = ["nightly"] }
 embassy-time = { version = "0.4.0", features = ["generic-queue-8"] }
 embedded-hal = "1.0.0"
 embedded-io = "0.6.1"
 embedded-io-async = "0.6.1"
-esp-bootloader-esp-idf = "0.1.0"
 esp-alloc = "0.8.0"
 esp-backtrace = { version = "0.16.0", features = [
     "esp32s3",
@@ -39,6 +37,7 @@ esp-backtrace = { version = "0.16.0", features = [
     "panic-handler",
     "println",
 ] }
+esp-bootloader-esp-idf = "0.1.0"
 esp-hal = { version = "1.0.0-beta.1", features = ["esp32s3", "unstable"] }
 esp-hal-embassy = { version = "0.8.1", features = ["esp32s3"] }
 esp-println = { version = "0.14.0", default-features = false, features = [

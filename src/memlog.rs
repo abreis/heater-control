@@ -33,6 +33,9 @@ struct LogStorage {
     // In characters.
     utilization: usize,
     capacity: usize,
+    // If enabled, prints new records over esp_println.
+    print: bool,
+    // If set, broadcasts new records over the watch channel.
     watch: Option<&'static watch::Watch<NoopRawMutex, Record, MEMLOG_WATCHERS>>,
 }
 
@@ -46,7 +49,7 @@ pub struct Record {
 impl Display for Record {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let timestamp = format_milliseconds_to_hms(self.instant.as_millis());
-        write!(f, "[{}] {}: {}\r\n", timestamp, self.level, self.text)
+        write!(f, "[{}] {}: {}", timestamp, self.level, self.text)
     }
 }
 
@@ -77,6 +80,7 @@ impl LogStorage {
             records: VecDeque::new(),
             utilization: 0,
             capacity,
+            print: false,
             watch: None,
         }
     }
@@ -107,6 +111,11 @@ impl LogStorage {
             text,
         };
 
+        // If log printing is enabled, print this record.
+        if self.print {
+            esp_println::println!("{new_record}");
+        }
+
         // If log watching is enabled, share this record.
         if let Some(watch) = self.watch {
             watch.sender().send(new_record.clone());
@@ -123,6 +132,10 @@ impl LogStorage {
 }
 
 impl SharedLogger {
+    pub fn enable_print(&self) {
+        self.inner.borrow_mut().print = true;
+    }
+
     pub fn enable_watch(&self) {
         let mut inner = self.inner.borrow_mut();
         if inner.watch.is_none() {
