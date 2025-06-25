@@ -3,14 +3,18 @@
 
 use alloc::{boxed::Box, collections::vec_deque::VecDeque, format, string::String};
 use core::{cell::RefCell, fmt::Display};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use embassy_time::Instant;
 
+const MEMLOG_WATCHERS: usize = 2;
 const DISCARD_ERROR: &str = "log discarded: too large for storage";
 
 #[derive(Clone, Copy)]
 pub struct SharedLogger {
     inner: &'static RefCell<LogStorage>,
 }
+
+pub type LogDynReceiver = watch::DynReceiver<'static, Record>;
 
 pub fn init(capacity: usize) -> SharedLogger {
     // Ensure we have enough space to store the error about not having enough space.
@@ -29,6 +33,7 @@ struct LogStorage {
     // In characters.
     utilization: usize,
     capacity: usize,
+    watch: Option<&'static watch::Watch<NoopRawMutex, Record, MEMLOG_WATCHERS>>,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +41,13 @@ pub struct Record {
     pub instant: Instant,
     pub level: Level,
     pub text: String,
+}
+
+impl Display for Record {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let timestamp = format_milliseconds_to_hms(self.instant.as_millis());
+        write!(f, "[{}] {}: {}\r\n", timestamp, self.level, self.text)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -60,11 +72,12 @@ impl Display for Level {
 }
 
 impl LogStorage {
-    const fn with_capacity(capacity: usize) -> Self {
+    fn with_capacity(capacity: usize) -> Self {
         LogStorage {
             records: VecDeque::new(),
             utilization: 0,
             capacity,
+            watch: None,
         }
     }
 
@@ -86,13 +99,21 @@ impl LogStorage {
             self.utilization -= removed.text.len();
         }
 
-        // Store the new record.
         self.utilization += text.len();
-        self.records.push_front(Record {
+
+        let new_record = Record {
             instant: Instant::now(),
             level,
             text,
-        });
+        };
+
+        // If log watching is enabled, share this record.
+        if let Some(watch) = self.watch {
+            watch.sender().send(new_record.clone());
+        }
+
+        // Store the new record.
+        self.records.push_front(new_record);
     }
 
     fn clear(&mut self) {
@@ -102,6 +123,23 @@ impl LogStorage {
 }
 
 impl SharedLogger {
+    pub fn enable_watch(&self) {
+        let mut inner = self.inner.borrow_mut();
+        if inner.watch.is_none() {
+            inner.watch = Some(Box::leak(Box::new(watch::Watch::new())));
+        }
+    }
+
+    // Get a watcher to be notified of new logs.
+    //
+    // Returns None if log watching is not enabled, or if the number of watchers is exhausted.
+    pub fn watch(&self) -> Option<LogDynReceiver> {
+        self.inner
+            .borrow()
+            .watch
+            .map(|watch| watch.dyn_receiver())?
+    }
+
     pub fn trace(&self, text: impl Into<String>) {
         self.inner.borrow_mut().add_record(Level::Trace, text);
     }
