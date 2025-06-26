@@ -2,7 +2,7 @@
 use super::{net_monitor::NetStatusDynReceiver, temp_sensor::TempSensorDynReceiver};
 use crate::{
     ESP_APP_DESC,
-    memlog::{self, SharedLogger},
+    memlog::SharedLogger,
     state::SharedState,
     task::ssr_control::{SsrCommand, SsrCommandPublisher, SsrDutyDynReceiver, SsrDutyDynSender},
 };

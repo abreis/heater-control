@@ -113,7 +113,7 @@ async fn connect_to_broker<'a>(
 // + publish "online" to the /status topic
 // + subscribe to the duty cycle command topic: /duty/set
 // + send received values to duty control channel
-// + confirm values to /duty/state
+// + confirm values to /duty
 //   - TODO working?
 // + send case temperature to mqtt
 
@@ -235,15 +235,11 @@ pub async fn run(
                     .await
                     {
                         Either7::First(duty) => {
-                            let topic_duty_state = concatcp!(
-                                MQTT_TOPIC_ROOT,
-                                '/',
-                                MQTT_TOPIC_DEVICE_NAME,
-                                "/duty/state"
-                            );
+                            let topic_duty =
+                                concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/duty");
                             mqtt_client
                                 .publish(
-                                    topic_duty_state,
+                                    topic_duty,
                                     duty.to_string().as_bytes(),
                                     QualityOfService::Qos0,
                                     false,
