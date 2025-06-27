@@ -30,13 +30,25 @@ use mountain_mqtt::{
     packets::connect::Will,
 };
 
-use crate::config::MQTT_CLIENT_ID;
 const MQTT_SERVER_ADDR: &str = "broker.abu";
 const MQTT_PORT: u16 = 1883;
 const MQTT_TIMEOUT_MS: u32 = 5000;
 const MQTT_PROPERTIES: usize = 16;
-const MQTT_TOPIC_ROOT: &str = "devices/heater";
+const MQTT_HEATER_TOPIC_ROOT: &str = "devices/heater";
+use crate::config::MQTT_CLIENT_ID;
 use crate::config::MQTT_TOPIC_DEVICE_NAME;
+
+macro_rules! topic_heater {
+    ($TAIL:expr) => {
+        concatcp!(
+            MQTT_HEATER_TOPIC_ROOT,
+            '/',
+            MQTT_TOPIC_DEVICE_NAME,
+            '/',
+            $TAIL
+        )
+    };
+}
 
 struct MqttDelay;
 impl mountain_mqtt::client::Delay for MqttDelay {
@@ -88,7 +100,7 @@ async fn connect_to_broker<'a>(
     let will = Will::new(
         QualityOfService::Qos1,
         true,
-        concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/status"),
+        topic_heater!("status"),
         "offline".as_bytes(),
         heapless::Vec::<_, 0>::new(),
     );
@@ -181,10 +193,9 @@ pub async fn run(
         };
 
         // Publish an 'online' status.
-        let topic_status = concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/status");
         if mqtt_client
             .publish(
-                topic_status,
+                topic_heater!("status"),
                 "online".as_bytes(),
                 QualityOfService::Qos1,
                 true,
@@ -198,9 +209,8 @@ pub async fn run(
         }
 
         // Subscribe to duty cycle updates.
-        let topic_duty_set = concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/duty/set");
         if mqtt_client
-            .subscribe(topic_duty_set, QualityOfService::Qos1)
+            .subscribe(topic_heater!("duty/set"), QualityOfService::Qos1)
             .await
             .is_err()
         {
@@ -216,7 +226,7 @@ pub async fn run(
                 // Poor API design of mountain-mqtt forces us to poll periodically.
                 let mut poll_fut = Timer::after_secs(1);
 
-                loop {
+                '_select: loop {
                     let duty_fut = ssrcontrol_duty_receiver.changed();
                     let temp_fut = tempsensor_receiver.changed();
                     let net_fut = netstatus_receiver.changed();
@@ -235,11 +245,9 @@ pub async fn run(
                     .await
                     {
                         Either7::First(duty) => {
-                            let topic_duty =
-                                concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/duty");
                             mqtt_client
                                 .publish(
-                                    topic_duty,
+                                    topic_heater!("duty"),
                                     duty.to_string().as_bytes(),
                                     QualityOfService::Qos0,
                                     false,
@@ -250,15 +258,9 @@ pub async fn run(
                         // Publish case temperature sensor readings.
                         Either7::Second(temp) => {
                             if let Ok(data) = temp {
-                                let topic_temp_case = concatcp!(
-                                    MQTT_TOPIC_ROOT,
-                                    '/',
-                                    MQTT_TOPIC_DEVICE_NAME,
-                                    "/temp/case"
-                                );
                                 mqtt_client
                                     .publish(
-                                        topic_temp_case,
+                                        topic_heater!("temp/case"),
                                         data.temperature.to_string().as_bytes(),
                                         QualityOfService::Qos0,
                                         false,
@@ -269,11 +271,9 @@ pub async fn run(
 
                         // Publish network status updates.
                         Either7::Third(net) => {
-                            let topic_net =
-                                concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/net");
                             mqtt_client
                                 .publish(
-                                    topic_net,
+                                    topic_heater!("net"),
                                     format!("{net:?}").as_bytes(),
                                     QualityOfService::Qos0,
                                     false,
@@ -283,11 +283,9 @@ pub async fn run(
 
                         // Publish logs.
                         Either7::Fourth(log) => {
-                            let topic_log =
-                                concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/log");
                             mqtt_client
                                 .publish(
-                                    topic_log,
+                                    topic_heater!("log"),
                                     format!("{log}").as_bytes(),
                                     QualityOfService::Qos0,
                                     false,
@@ -298,15 +296,9 @@ pub async fn run(
                         // Publish SSR commands.
                         Either7::Fifth(ssr_cmd) => {
                             if let WaitResult::Message(cmd) = ssr_cmd {
-                                let topic_log = concatcp!(
-                                    MQTT_TOPIC_ROOT,
-                                    '/',
-                                    MQTT_TOPIC_DEVICE_NAME,
-                                    "/ssr_cmd"
-                                );
                                 mqtt_client
                                     .publish(
-                                        topic_log,
+                                        topic_heater!("ssr"),
                                         format!("{cmd:?}").as_bytes(),
                                         QualityOfService::Qos0,
                                         false,
@@ -362,8 +354,7 @@ impl<const P: usize> EventHandler<P> for MqttHandler {
         };
 
         // Receive SSR duty updates and set the heater duty cycle.
-        let topic_duty_set = concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, "/duty/set");
-        if message.topic_name.eq(topic_duty_set) {
+        if message.topic_name.eq(topic_heater!("duty/set")) {
             let duty_str = core::str::from_utf8(message.payload)?;
 
             let duty: u8 = duty_str
@@ -392,11 +383,16 @@ impl<const P: usize> EventHandler<P> for MqttHandler {
             }
 
             self.ssrcontrol_duty_sender.send(duty);
-            Ok(())
-        } else {
-            // Unrecognized topics.
-            Err(EventHandlerError::UnexpectedApplicationMessageTopic)
+            return Ok(());
         }
+
+        // Unrecognized topics.
+        self.memlog
+            .warn(format!("unexpected topic: {}", message.topic_name));
+
+        // Note: we deliberately do not error on an unexpected topic.
+
+        Ok(())
     }
 }
 

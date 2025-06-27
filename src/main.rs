@@ -23,7 +23,8 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     // let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_240MHz);
-    let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
+    // let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
+    let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let peripherals = esp_hal::init(esp_config);
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);

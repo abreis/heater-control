@@ -10,8 +10,8 @@ ESP_WIFI_CONFIG_COUNTRY_CODE = "NZ"
 # Keeps USB running when using WiFi. This allows debugging and log
 # messages via USB Serial JTAG. Turn off for best WiFi performance.
 #
-# Warning: when disabled, G0 must be held low on boot to flash (use button or pin).
-# ESP_WIFI_CONFIG_PHY_ENABLE_USB = "false"
+# Warning: when disabled, boot pin must be held low to flash (use button or pin).
+ESP_WIFI_CONFIG_PHY_ENABLE_USB = "false"
 
 [build]
 rustflags = ["-C", "link-arg=-nostartfiles"]
