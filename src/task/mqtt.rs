@@ -1,5 +1,5 @@
 use crate::{
-    futures::{Either7, select7},
+    futures::{Either8, select8},
     memlog::SharedLogger,
     state::SharedState,
     task::{
@@ -15,7 +15,7 @@ use alloc::{
 use const_format::concatcp;
 use embassy_net::{IpAddress, IpEndpoint, dns::DnsQueryType, tcp::TcpSocket};
 use embassy_sync::pubsub::WaitResult;
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer, with_timeout};
 use mountain_mqtt::{
     client::{
         Client, ClientError, ClientNoQueue, ClientReceivedEvent, ConnectionSettings, EventHandler,
@@ -30,6 +30,8 @@ use mountain_mqtt::{
     packets::connect::Will,
 };
 
+const MQTT_PING_INTERVAL: Duration = Duration::from_secs(20);
+const MQTT_DUTY_TIMEOUT: Duration = Duration::from_secs(60);
 const MQTT_SERVER_ADDR: &str = "broker.abu";
 const MQTT_PORT: u16 = 1883;
 const MQTT_TIMEOUT_MS: u32 = 5000;
@@ -222,7 +224,8 @@ pub async fn run(
         // We continue this loop if the mqtt client throws an error but did not disconnect.
         'main: loop {
             let catch: Result<(), ClientError> = async {
-                let mut ping_fut = Timer::after_secs(10);
+                let mut ping_fut = Timer::after(MQTT_PING_INTERVAL);
+                let mut duty_periodic_fut = Timer::after(MQTT_DUTY_TIMEOUT);
                 // Poor API design of mountain-mqtt forces us to poll periodically.
                 let mut poll_fut = Timer::after_secs(1);
 
@@ -233,8 +236,9 @@ pub async fn run(
                     let log_fut = logwatch_receiver.changed();
                     let ssrcmd_fut = ssrcontrol_command_subscriber.next_message();
 
-                    match select7(
+                    match select8(
                         duty_fut,
+                        &mut duty_periodic_fut,
                         temp_fut,
                         net_fut,
                         log_fut,
@@ -244,7 +248,8 @@ pub async fn run(
                     )
                     .await
                     {
-                        Either7::First(duty) => {
+                        // Publish duty updates.
+                        Either8::First(duty) => {
                             mqtt_client
                                 .publish(
                                     topic_heater!("duty"),
@@ -253,10 +258,30 @@ pub async fn run(
                                     false,
                                 )
                                 .await?;
+
+                            // Reset the duty periodic timer.
+                            duty_periodic_fut = Timer::after(MQTT_DUTY_TIMEOUT);
+                        }
+
+                        // Publish the current duty if no updates were issued recently.
+                        Either8::Second(_timeout) => {
+                            if let Some(duty) = ssrcontrol_duty_receiver.try_get() {
+                                mqtt_client
+                                    .publish(
+                                        topic_heater!("duty"),
+                                        duty.to_string().as_bytes(),
+                                        QualityOfService::Qos0,
+                                        false,
+                                    )
+                                    .await?;
+                            }
+
+                            // Reset the duty periodic timer.
+                            duty_periodic_fut = Timer::after(MQTT_DUTY_TIMEOUT);
                         }
 
                         // Publish case temperature sensor readings.
-                        Either7::Second(temp) => {
+                        Either8::Third(temp) => {
                             if let Ok(data) = temp {
                                 mqtt_client
                                     .publish(
@@ -270,7 +295,7 @@ pub async fn run(
                         }
 
                         // Publish network status updates.
-                        Either7::Third(net) => {
+                        Either8::Fourth(net) => {
                             mqtt_client
                                 .publish(
                                     topic_heater!("net"),
@@ -282,7 +307,7 @@ pub async fn run(
                         }
 
                         // Publish logs.
-                        Either7::Fourth(log) => {
+                        Either8::Fifth(log) => {
                             mqtt_client
                                 .publish(
                                     topic_heater!("log"),
@@ -294,7 +319,7 @@ pub async fn run(
                         }
 
                         // Publish SSR commands.
-                        Either7::Fifth(ssr_cmd) => {
+                        Either8::Sixth(ssr_cmd) => {
                             if let WaitResult::Message(cmd) = ssr_cmd {
                                 mqtt_client
                                     .publish(
@@ -308,13 +333,13 @@ pub async fn run(
                         }
 
                         // Periodically send a ping to the server.
-                        Either7::Sixth(_ping) => {
+                        Either8::Seventh(_ping) => {
                             mqtt_client.send_ping().await?;
                             ping_fut = Timer::after_secs(10);
                         }
 
                         // Periodic poll for MQTT messages.
-                        Either7::Seventh(_timeout) => {
+                        Either8::Eighth(_timeout) => {
                             mqtt_client.poll(false).await?;
                             poll_fut = Timer::after_secs(1);
                         }

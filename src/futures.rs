@@ -279,3 +279,133 @@ where
         Poll::Pending
     }
 }
+
+// ====================================================================
+
+/// Result for [`select8`].
+#[derive(Debug, Clone)]
+pub enum Either8<A, B, C, D, E, F, G, H> {
+    /// First future finished first.
+    First(A),
+    /// Second future finished first.
+    Second(B),
+    /// Third future finished first.
+    Third(C),
+    /// Fourth future finished first.
+    Fourth(D),
+    /// Fifth future finished first.
+    Fifth(E),
+    /// Sixth future finished first.
+    Sixth(F),
+    /// Seventh future finished first.
+    Seventh(G),
+    /// Eighth future finished first.
+    Eighth(H),
+}
+
+/// Same as [`select`], but with more futures.
+pub fn select8<A, B, C, D, E, F, G, H>(
+    a: A,
+    b: B,
+    c: C,
+    d: D,
+    e: E,
+    f: F,
+    g: G,
+    h: H,
+) -> Select8<A, B, C, D, E, F, G, H>
+where
+    A: Future,
+    B: Future,
+    C: Future,
+    D: Future,
+    E: Future,
+    F: Future,
+    G: Future,
+    H: Future,
+{
+    Select8 {
+        a,
+        b,
+        c,
+        d,
+        e,
+        f,
+        g,
+        h,
+    }
+}
+
+/// Future for the [`select8`] function.
+#[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
+pub struct Select8<A, B, C, D, E, F, G, H> {
+    a: A,
+    b: B,
+    c: C,
+    d: D,
+    e: E,
+    f: F,
+    g: G,
+    h: H,
+}
+
+impl<A, B, C, D, E, F, G, H> Future for Select8<A, B, C, D, E, F, G, H>
+where
+    A: Future,
+    B: Future,
+    C: Future,
+    D: Future,
+    E: Future,
+    F: Future,
+    G: Future,
+    H: Future,
+{
+    type Output = Either8<
+        A::Output,
+        B::Output,
+        C::Output,
+        D::Output,
+        E::Output,
+        F::Output,
+        G::Output,
+        H::Output,
+    >;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        let a = unsafe { Pin::new_unchecked(&mut this.a) };
+        let b = unsafe { Pin::new_unchecked(&mut this.b) };
+        let c = unsafe { Pin::new_unchecked(&mut this.c) };
+        let d = unsafe { Pin::new_unchecked(&mut this.d) };
+        let e = unsafe { Pin::new_unchecked(&mut this.e) };
+        let f = unsafe { Pin::new_unchecked(&mut this.f) };
+        let g = unsafe { Pin::new_unchecked(&mut this.g) };
+        let h = unsafe { Pin::new_unchecked(&mut this.h) };
+        if let Poll::Ready(x) = a.poll(cx) {
+            return Poll::Ready(Either8::First(x));
+        }
+        if let Poll::Ready(x) = b.poll(cx) {
+            return Poll::Ready(Either8::Second(x));
+        }
+        if let Poll::Ready(x) = c.poll(cx) {
+            return Poll::Ready(Either8::Third(x));
+        }
+        if let Poll::Ready(x) = d.poll(cx) {
+            return Poll::Ready(Either8::Fourth(x));
+        }
+        if let Poll::Ready(x) = e.poll(cx) {
+            return Poll::Ready(Either8::Fifth(x));
+        }
+        if let Poll::Ready(x) = f.poll(cx) {
+            return Poll::Ready(Either8::Sixth(x));
+        }
+        if let Poll::Ready(x) = g.poll(cx) {
+            return Poll::Ready(Either8::Seventh(x));
+        }
+        if let Poll::Ready(x) = h.poll(cx) {
+            return Poll::Ready(Either8::Eighth(x));
+        }
+        Poll::Pending
+    }
+}
